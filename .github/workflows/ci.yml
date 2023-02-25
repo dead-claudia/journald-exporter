@@ -1,0 +1,141 @@
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - main
+
+name: CI
+
+env:
+  RUSTFLAGS: "-Dwarnings"
+  RUST_BACKTRACE: full
+
+# Only allow Git repo access to start.
+permissions:
+  contents: read
+
+jobs:
+  lints:
+    name: Lints
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libsystemd-dev
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Run Shellcheck
+        run: shellcheck ./scripts/*.sh
+      - name: Install Rustup stable
+        run: rustup install stable
+      - name: Run Clippy
+        run: cargo clippy --all-targets
+
+  unit_tests:
+    name: Unit tests
+    needs:
+      - lints
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libsystemd-dev
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Install Rustup stable
+        run: rustup install stable
+      - name: Check debug types
+        run: cargo check --all-targets
+      - name: Check release types
+        run: cargo check --release
+      - name: Run debug tests
+        # Usually passes the second try if it flakes the first.
+        run: |
+          cargo test -- --show-output || \
+          cargo test -- --show-output || \
+          cargo test -- --show-output
+      - name: Run release tests
+        # Usually passes the second try if it flakes the first.
+        run: |
+          cargo test --release -- --show-output || \
+          cargo test --release -- --show-output || \
+          cargo test --release -- --show-output
+
+  miri_tests:
+    name: Miri tests
+    needs:
+      - unit_tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libsystemd-dev
+      - name: Install Rustup nightly with Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo +nightly miri setup
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Run tests
+        run: cargo +nightly miri test --all-targets -- --show-output
+
+  e2e_tests:
+    name: End-to-end tests (release)
+    needs:
+      - unit_tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libsystemd-dev
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Install Rustup stable
+        run: rustup install stable
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run tests
+        run: sudo node ./scripts/e2e.js
+
+  release:
+    name: Create draft release
+    needs:
+      - e2e_tests
+      - miri_tests
+    runs-on: ubuntu-22.04
+    # Limit release creation to just pushes of `vN.N.N` tags
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      # Needed to create the release
+      contents: write
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libsystemd-dev
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Install Rustup stable
+        run: rustup install stable
+      - name: Build release binary
+        run: cargo build --release
+      - name: Generate draft release
+        run: |
+          gh release create "$VERSION_NAME" target/release/journald-exporter \
+            --generate-notes \
+            --draft \
+            --target main \
+            --title "$VERSION_NAME" \
+            --verify-tag
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ github.token }}

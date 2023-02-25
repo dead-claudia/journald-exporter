@@ -1,0 +1,8 @@
+arithmetic-side-effects-allowed = [
+    # Allow instants and durations to have unchecked overflow. 64-bit Unix time wraparound
+    # shouldn't happen in the forseeable future.
+    "std::time::Duration",
+    "crate::ffi::sd_journal::SystemdMonotonicUsec",
+    # Not sure why this isn't explicitly ignored by Clippy for augmented assignment.
+    "std::num::Wrapping",
+]

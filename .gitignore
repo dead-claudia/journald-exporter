@@ -1,0 +1,11 @@
+*.temp
+*.tmp
+
+# Editor junk
+.vscode
+
+# Tooling junk
+.cargo
+
+# Build assets
+/target

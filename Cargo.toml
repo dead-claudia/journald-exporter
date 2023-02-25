@@ -1,0 +1,51 @@
+[package]
+name = "journald-exporter"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Claudia Meadows (@dead-claudia)"]
+
+[dependencies]
+bitflags = "2.0.2"
+libc = "0.2.137"
+libsystemd-sys = "0.9.3"
+log = { version = "0.4.17", features = ["std"] }
+notify = "5.0.0"
+base64 = "0.21.0"
+tiny_http = "0.12.0"
+time = "0.3.20"
+zeroize = "1.5.7"
+
+[dev-dependencies]
+# Simplifies test setup and the `waitid` hack.
+ctor = "0.1.26"
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"
+tempfile = "3.4.0"
+
+[profile.test]
+# 1. Test with release optimization settings (but retain safety checks), for increased test
+#    confidence.
+# 2. This helps speed up some of the tests. A few of them are pretty CPU intensive, so this helps.
+opt-level = "s"
+lto = "thin"
+codegen-units = 16
+debug = true
+debug-assertions = true
+overflow-checks = true
+
+[profile.release]
+strip = true
+opt-level = "s"
+debug = false
+debug-assertions = false
+# Retain these for security reasons.
+overflow-checks = true
+# Squeeze out a few more bytes. There are relatively few dependencies, so build times aren't a
+# concern with this.
+lto = true
+codegen-units = 1
+# I use panics sparingly, and always to crash. I also am careful to join (almost) all threads to
+# propagate their own panics in test. There's no reason panics should happen in practice, so I can
+# just squeeze a few more bytes out of it by aborting instead.
+panic = "abort"
