@@ -26,6 +26,9 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
