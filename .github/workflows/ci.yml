@@ -8,6 +8,10 @@ on:
 
 name: CI
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   test:
     uses: ./.github/workflows/test.yml

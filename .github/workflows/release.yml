@@ -5,9 +5,9 @@ on:
 
 name: Release
 
-# Only allow Git repo access to start.
 permissions:
   contents: read
+  checks: write
 
 jobs:
   test:
