@@ -30,6 +30,8 @@ jobs:
       contents: read
       checks: write
     steps:
+      - run: sudo apt-get update
+      - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
         with:
