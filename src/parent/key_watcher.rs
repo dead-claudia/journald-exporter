@@ -287,12 +287,6 @@ pub fn run_watcher(s: &'static ParentIpcState<impl ParentIpcMethods>) -> io::Res
 
         let state = replace(&mut *guard, EventState::Locked);
 
-        //     "timed_out={:?}, has_update={:?}, state={:?}",
-        //     result.timed_out(),
-        //     has_update,
-        //     &state,
-        // );
-
         *guard = match &state {
             EventState::Drop | EventState::ErrorAndDrop(_) | EventState::Locked => {
                 EventState::Locked
