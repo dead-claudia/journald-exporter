@@ -20,7 +20,7 @@ This is all written in Rust for simplicity and performance.
 
     # Note: you have to use `mv` to replace the file to avoid "text file busy"
     # file access errors on update
-    chmod +x journald-exporter
+    chmod 755 journald-exporter
     sudo cp journald-exporter journald-exporter.tmp
     sudo mv journald-exporter.tmp /usr/sbin/journald-exporter
     ```
