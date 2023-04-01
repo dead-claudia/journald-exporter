@@ -57,8 +57,9 @@ This is all written in Rust for simplicity and performance.
     # reasonably possible.
     NoNewPrivileges=true
     ProtectSystem=strict
-    NoExecPaths=/
-    ExecPaths=/usr/sbin/journald-exporter
+    # If your systemd version is 248 or later, it's recommended to uncomment these lines
+    #NoExecPaths=/
+    #ExecPaths=/usr/sbin/journald-exporter
     ProtectClock=true
     ProtectKernelTunables=true
     ProtectKernelModules=true
@@ -85,7 +86,7 @@ This is all written in Rust for simplicity and performance.
     sudo chmod 600 "$name"
     sudo mv "$name" "/etc/journald-exporter/keys/$name"
     ```
-    
+
     You'll also want to copy this key - you'll need it later. You can use the following (using `$name` from above) to set up the key for a local Prometheus instance:
 
     ```sh
@@ -122,7 +123,7 @@ This is all written in Rust for simplicity and performance.
       - targets:
         - localhost:12345
     ```
-    
+
     > If you're using a different port, you'll obviously want to change `12345` to that.
 
 Once you've done all of this, metrics should start flowing within a few minutes.
