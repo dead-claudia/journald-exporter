@@ -1,0 +1,47 @@
+on:
+  push:
+    tags:
+      - v*
+
+name: Release
+
+# Only allow Git repo access to start.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    name: Create draft release
+    needs:
+      - ci
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to create the release
+      contents: write
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: journald-exporter
+      - name: Download release artifact
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          name: journald-exporter
+          run_id: ${{ needs.ci.outputs.run_id }}
+          workflow_conclusion: ${{ needs.ci.result }}
+      - name: Generate draft release
+        run: |
+          gh release create "$VERSION_NAME" journald-exporter \
+            --generate-notes \
+            --draft \
+            --target main \
+            --title "$VERSION_NAME" \
+            --verify-tag
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

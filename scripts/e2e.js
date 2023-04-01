@@ -35,6 +35,8 @@ const args = {
     testInterval: 5,
 
     port: 8080,
+
+    binary: path.resolve("target/release/journald-exporter"),
 }
 
 let argName
@@ -66,6 +68,11 @@ for (const arg of process.argv.slice(2)) {
             if (args.testInterval < 1) bail("Test interval must be a positive number of seconds")
             break
 
+        case "-b":
+            if (!arg) bail("Release binary path must not be empty.")
+            args.binary = path.resolve(arg)
+            break
+
         default:
             if (argName) bail(`Expected a value for argument \`${argName}\``)
         }
@@ -93,8 +100,6 @@ function safeAbort(ctrl) {
         reportAsyncError(e)
     }
 }
-
-const pwd = path.resolve(process.cwd())
 
 const ctrl = new AbortController()
 process.on("SIGTERM", () => { safeAbort(ctrl) })
@@ -183,7 +188,7 @@ function fetchLoop(parentSignal, terminateHandler) {
 
 function runChildTest() {
     const child = child_process.spawn(
-        path.join(pwd, "/target/release/journald-exporter"),
+        args.binary,
         ["--port", args.port, "--key-dir", args.keyDir],
         {stdio: "inherit"},
     )

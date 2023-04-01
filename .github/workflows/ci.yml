@@ -1,9 +1,15 @@
 on:
+  workflow_call:
+    secrets:
+      GITHUB_TOKEN:
+        description: Github secret token
+        required: true
+    outputs:
+      run_id:
+        value: ${{ github.run_id }}
   push:
     branches:
       - main
-    tags:
-      - v*
   pull_request:
     branches:
       - main
@@ -19,123 +25,178 @@ permissions:
   contents: read
 
 jobs:
-  lints:
-    name: Lints
-    runs-on: ubuntu-20.04
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install libsystemd-dev
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Run Shellcheck
+      - uses: actions/checkout@v3
+      - name: Shellcheck
         run: shellcheck ./scripts/*.sh
-      - name: Install Rustup stable
-        run: rustup install stable
-      - name: Run Clippy
-        run: cargo clippy --all-targets
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-cache
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          components: clippy
+      - name: Check
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-targets
+
+  rustfmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-cache
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          components: rustfmt
+      - name: Check
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all --check
+
+  build:
+    name: Build
+    needs:
+      - clippy
+      - rustfmt
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux2014_x86_64
+    steps:
+      - name: Show GLIBC version
+        run: ldd --version
+      - run: sudo yum makecache
+      - run: sudo yum -y install systemd-devel
+      - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-cache
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+      - name: Build debug test binary
+        id: test-debug
+        run: cargo test --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
+      - name: Build release test binary
+        id: test-release
+        run: cargo test --no-run --message-format=json |  jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
+      - name: Build release binary
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: journald-exporter
+          path: target/release/journald-exporter
+          if-no-files-found: error
+      - name: Upload debug unit test artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-debug
+          path: ${{ steps.test-debug.outputs.binary }}
+          if-no-files-found: error
+          # Much shorter retention period as it's mostly used for testing and could get large.
+          retention-days: 7
+      - name: Upload release unit test artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-release
+          path: ${{ steps.test-release.outputs.binary }}
+          if-no-files-found: error
+          # Much shorter retention period as it's mostly used for testing and could get large.
+          retention-days: 7
 
   unit_tests:
     name: Unit tests
     needs:
-      - lints
-    runs-on: ubuntu-20.04
+      - build
+    strategy:
+      matrix:
+        os:
+        - ubuntu-18.04
+        - ubuntu-20.04
+        - ubuntu-22.04
+        binary:
+        - test-debug
+        - test-release
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install libsystemd-dev
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Install Rustup stable
-        run: rustup install stable
-      - name: Check debug types
-        run: cargo check --all-targets
-      - name: Check release types
-        run: cargo check --release
-      - name: Run debug tests
-        # Usually passes the second try if it flakes the first.
-        run: |
-          cargo test -- --show-output || \
-          cargo test -- --show-output || \
-          cargo test -- --show-output
-      - name: Run release tests
-        # Usually passes the second try if it flakes the first.
-        run: |
-          cargo test --release -- --show-output || \
-          cargo test --release -- --show-output || \
-          cargo test --release -- --show-output
+      - name: Download test binary artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ matrix.binary }}
+          path: run-tests
+      - name: Configure test binary permissions
+        run: chmod +x run-tests
+      - name: Test
+        uses: nick-fields/retry@v2
+        with:
+          command: run-tests --show-output
+          # Usually passes the second try if it flakes the first.
+          max_attempts: 3
 
   miri_tests:
     name: Miri tests
     needs:
       - unit_tests
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install libsystemd-dev
-      - name: Install Rustup nightly with Miri
-        run: |
-          rustup toolchain install nightly --component miri
-          rustup override set nightly
-          cargo +nightly miri setup
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Run tests
-        run: cargo +nightly miri test --all-targets -- --show-output
+      - run: sudo apt-get update
+      - run: sudo apt-get install libsystemd-dev
+      - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: miri
+          override: true
+      - name: Setup Miri
+        uses: actions-rs/cargo@v1
+        with:
+          toolchain: nightly
+          command: miri
+          args: setup
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          toolchain: nightly
+          command: miri
+          args: --all-targets -- --show-output
 
   e2e_tests:
     name: End-to-end tests (release)
     needs:
       - unit_tests
-    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        os:
+        - ubuntu-18.04
+        - ubuntu-20.04
+        - ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install libsystemd-dev
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Install Rustup stable
-        run: rustup install stable
-      - name: Build release binary
-        run: cargo build --release
-      - name: Run tests
-        run: sudo node ./scripts/e2e.js
-
-  release:
-    name: Create draft release
-    needs:
-      - e2e_tests
-      - miri_tests
-    runs-on: ubuntu-20.04
-    # Limit release creation to just pushes of `vN.N.N` tags
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      # Needed to create the release
-      contents: write
-    steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install libsystemd-dev
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Install Rustup stable
-        run: rustup install stable
-      - name: Build release binary
-        run: cargo build --release
-      - name: Generate draft release
-        run: |
-          gh release create "$VERSION_NAME" target/release/journald-exporter \
-            --generate-notes \
-            --draft \
-            --target main \
-            --title "$VERSION_NAME" \
-            --verify-tag
-        env:
-          VERSION_NAME: ${{ github.ref_name }}
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Download release artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: journald-exporter
+      - name: Configure release binary permissions
+        run: chmod +x journald-exporter
+      - name: Test
+        run: sudo node ./scripts/e2e.js -b journald-exporter
