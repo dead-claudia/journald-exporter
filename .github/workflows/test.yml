@@ -147,7 +147,7 @@ jobs:
         uses: nick-fields/retry@v2
         with:
           timeout_minutes: 2
-          command: run-tests --show-output
+          command: ./run-tests --show-output
           # Usually passes the second try if it flakes the first.
           max_attempts: 3
 
