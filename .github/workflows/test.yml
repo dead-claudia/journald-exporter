@@ -33,6 +33,7 @@ jobs:
           shared-key: ci-cache
       - uses: actions-rs/toolchain@v1
         with:
+          toolchain: stable
           profile: minimal
           components: clippy
       - name: Check
@@ -51,6 +52,7 @@ jobs:
           shared-key: ci-cache
       - uses: actions-rs/toolchain@v1
         with:
+          toolchain: stable
           profile: minimal
           components: rustfmt
       - name: Check
@@ -77,6 +79,7 @@ jobs:
           shared-key: ci-cache
       - uses: actions-rs/toolchain@v1
         with:
+          toolchain: stable
           profile: minimal
       - name: Build debug test binary
         id: test-debug
