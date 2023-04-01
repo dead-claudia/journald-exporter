@@ -90,9 +90,9 @@ This is all written in Rust for simplicity and performance.
 
     ```sh
     sudo mkdir /etc/prometheus-keys
-    sudo cp "/etc/journald-exporter/keys/$name" "/etc/prometheus-keys/$name"
-    sudo chgrp journald-exporter "/etc/prometheus-keys/$name"
-    sudo chmod 640 "/etc/prometheus-keys/$name"
+    sudo cp "/etc/journald-exporter/keys/$name" /etc/prometheus-keys/journald-exporter.key
+    sudo chgrp journald-exporter /etc/prometheus-keys/journald-exporter.key
+    sudo chmod 640 /etc/prometheus-keys/journald-exporter.key
     ```
 
 6. Start the service.
@@ -111,13 +111,13 @@ This is all written in Rust for simplicity and performance.
         - If you set up a TLS proxy in the previous step, use the port you set that up with, not the one for the exporter.
     - Authorization: Basic auth with user `metrics` and password set to the key generated earlier
 
-    If you're scraping locally from Prometheus or similar (like [Grafana Agent](https://grafana.com/docs/agent/latest/)), your scrape config should look something like this, where `$name` is the value generated from step 5:
+    If you're scraping locally from Prometheus or similar (like [Grafana Agent](https://grafana.com/docs/agent/latest/)), your scrape config should look something like this:
 
     ```yaml
     # Add this to the `scrape_configs:` section of your Prometheus config
     - job_name: journald-exporter
       authorization:
-        credentials_file: /etc/prometheus-keys/$name
+        credentials_file: /etc/prometheus-keys/journald-exporter.key
       static_configs:
       - targets:
         - localhost:12345
