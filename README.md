@@ -10,9 +10,26 @@ This is all written in Rust for simplicity and performance.
 
 ## Installation
 
+> This assumes a basic understanding of shell commands and shell variables.
+
 1. [Download the latest binary](https://github.com/dead-claudia/journald-exporter/releases) and install it somewhere in your `$PATH`. `/usr/sbin/journald-exporter` is recommended.
 
-2. Set up a `journald-exporter` system user with same-named group. On Debian, `sudo adduser --system --group journald-exporter` will work. (No home directory is needed.)
+    ```sh
+    # Assumes `journald-exporter` is in the current directory and `/usr/sbin`
+    # is in your default `$PATH`
+
+    # Note: you have to use `mv` to replace the file to avoid "text file busy"
+    # file access errors on update
+    chmod +x journald-exporter
+    sudo cp journald-exporter journald-exporter.tmp
+    sudo mv journald-exporter.tmp /usr/sbin/journald-exporter
+    ```
+
+2. Set up a `journald-exporter` system user with same-named group. No home directory is needed.
+
+    ```sh
+    sudo useradd --system --user-group journald-exporter
+    ```
 
 3. Place a systemd service unit file in `/usr/local/lib/systemd/system/journald-exporter.service` with the following contents:
 
@@ -54,19 +71,63 @@ This is all written in Rust for simplicity and performance.
 
     If you want, or need, to change the key directory or port number, this is where you'll need to configure it.
 
-4. Make the `/etc/journald-exporter/keys` directory mentioned above. This is where you'll put your API keys.
+4. Make the `/etc/journald-exporter/keys` directory mentioned above, with an owner of root and permissions of 755 (user has all perms, everyone else has only read/execute). This is where you'll put your API keys.
 
-5. Create an API key via `openssl rand -hex -out "$(date -uIseconds).key" 32` and copy it to `/etc/journald-exporter/keys`.
+    ```sh
+    sudo mkdir --mode=755 /etc/journald-exporter/keys
+    ```
 
-6. Start the service (as in, `sudo systemctl start journald-exporter.service`).
+5. Create an API key via `openssl rand -hex -out "$(date -uIseconds).key" 32` and copy it to `/etc/journald-exporter/keys` with an owner of root and permissions of 600 (root can read and write, nobody else can access).
 
-7. If you plan to listen over the public Internet, set up a local TLS proxy that accepts encrypted connections and forwards them decrypted to the server to avoid leaking the API key. Then, you can poke holes as needed in your system's firewall to allow inbound connections to the above port. If you plan to only invoke this locally (say, you're using [Grafana Agent](https://grafana.com/docs/agent/latest/)), you can skip this step (but do *not* open that port in the system firewall).
+    ```sh
+    name="$(date -uIseconds).key"
+    sudo openssl rand -hex -out "$name" 32
+    sudo chmod 600 "$name"
+    sudo mv "$name" "/etc/journald-exporter/keys/$name"
+    ```
+    
+    You'll also want to copy this key - you'll need it later. You can use the following (using `$name` from above) to set up the key for a local Prometheus instance:
 
-8. [Configure your Prometheus instance to scrape the service](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config) using the API key file generated from earlier as the password file. If you're using [Grafana Agent](https://grafana.com/docs/agent/latest/) or similar, you'll want to add the scrape config rule there instead. If you set up a TLS proxy to run it over the public Internet, use the port you set that up with, not the one you configured this exporter to use.
+    ```sh
+    sudo mkdir /etc/prometheus-keys
+    sudo cp "/etc/journald-exporter/keys/$name" "/etc/prometheus-keys/$name"
+    sudo chgrp journald-exporter "/etc/prometheus-keys/$name"
+    sudo chmod 640 "/etc/prometheus-keys/$name"
+    ```
 
-9. If you've done everything above, metrics should start flowing.
+6. Start the service.
 
-To update, just replace the binary (you'll want to use the `mv journald-exporter /usr/sbin/` file replacement trick to avoid "text file busy" file access errors) and restart the service via `systemctl restart journald-exporter.service`.
+    ```sh
+    sudo systemctl start journald-exporter.service
+    ```
+
+7. **If you're scraping locally, skip this step.** If you plan to listen over the public Internet, you'll need to do a couple things to avoid leaking the API key: Set up a local TLS termination proxy to forward connections decrypted to the exporter, then update your system's firewall to allow inbound connections to the port that TLS proxy listens on.
+
+    If you plan to only scrape locally, or if you're using things like [Grafana Agent](https://grafana.com/docs/agent/latest/), you can skip this step. Be careful to *not* open the port for the exporter in the system firewall in this case.
+
+8. [Configure your Prometheus instance to scrape the service](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config) using the API key file generated from earlier as the password file. You'll want these fields set:
+
+    - URL: `http://localhost:12345` if you're querying locally, or `https://<your-host-name>:<tls-proxy-port>` if you're accessing it remotely
+        - If you set up a TLS proxy in the previous step, use the port you set that up with, not the one for the exporter.
+    - Authorization: Basic auth with user `metrics` and password set to the key generated earlier
+
+    If you're scraping locally from Prometheus or similar (like [Grafana Agent](https://grafana.com/docs/agent/latest/)), your scrape config should look something like this, where `$name` is the value generated from step 5:
+
+    ```yaml
+    # Add this to the `scrape_configs:` section of your Prometheus config
+    - job_name: journald-exporter
+      authorization:
+        credentials_file: /etc/prometheus-keys/$name
+      static_configs:
+      - targets:
+        - localhost:12345
+    ```
+    
+    > If you're using a different port, you'll obviously want to change `12345` to that.
+
+Once you've done all of this, metrics should start flowing within a few minutes.
+
+To update, just reinstall the binary per the first installation step and restart the service via `systemctl restart journald-exporter.service`.
 
 ## Metrics emitted
 
