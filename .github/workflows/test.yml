@@ -4,7 +4,7 @@ on:
       run_id:
         value: ${{ github.run_id }}
 
-name: CI
+name: Test
 
 env:
   RUSTFLAGS: "-Dwarnings"
