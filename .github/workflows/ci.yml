@@ -21,7 +21,7 @@ permissions:
 jobs:
   lints:
     name: Lints
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Install dependencies
         run: |
@@ -40,7 +40,7 @@ jobs:
     name: Unit tests
     needs:
       - lints
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Install dependencies
         run: |
@@ -71,7 +71,7 @@ jobs:
     name: Miri tests
     needs:
       - unit_tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Install dependencies
         run: |
@@ -91,7 +91,7 @@ jobs:
     name: End-to-end tests (release)
     needs:
       - unit_tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Install dependencies
         run: |
@@ -111,7 +111,7 @@ jobs:
     needs:
       - e2e_tests
       - miri_tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     # Limit release creation to just pushes of `vN.N.N` tags
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
