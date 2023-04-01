@@ -10,15 +10,13 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  test:
+    uses: ./.github/workflows/test.yml
 
   release:
     name: Create draft release
     needs:
-      - ci
+      - test
     runs-on: ubuntu-latest
     permissions:
       # Needed to create the release
@@ -32,8 +30,8 @@ jobs:
         uses: dawidd6/action-download-artifact@v2
         with:
           name: journald-exporter
-          run_id: ${{ needs.ci.outputs.run_id }}
-          workflow_conclusion: ${{ needs.ci.result }}
+          run_id: ${{ needs.test.outputs.run_id }}
+          workflow_conclusion: ${{ needs.test.result }}
       - name: Generate draft release
         run: |
           gh release create "$VERSION_NAME" journald-exporter \
