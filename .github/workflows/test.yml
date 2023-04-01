@@ -140,16 +140,17 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.binary }}
-          path: run-tests
       - name: Configure test binary permissions
-        run: chmod +x run-tests
+        run: chmod +x $BINARY
       - name: Test
         uses: nick-fields/retry@v2
         with:
           timeout_minutes: 2
-          command: ./run-tests --show-output
+          command: ./$BINARY --show-output
           # Usually passes the second try if it flakes the first.
           max_attempts: 3
+        env:
+          BINARY: ${{ matrix.binary }}
 
   miri_tests:
     name: Miri tests
