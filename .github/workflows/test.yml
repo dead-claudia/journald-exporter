@@ -65,7 +65,7 @@ jobs:
         run: cargo test --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
       - name: Build release test binary
         id: test-release
-        run: cargo test --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
+        run: cargo test --release --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
       - name: Build release binary
         uses: actions-rs/cargo@v1
         with:
