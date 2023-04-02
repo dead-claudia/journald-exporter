@@ -15,16 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  shellcheck:
-    name: Shellcheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Shellcheck
-        run: shellcheck ./scripts/*.sh
-
-  clippy:
-    name: Clippy
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,34 +25,19 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-cache
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
           components: clippy
+      - name: Shellcheck
+        run: shellcheck ./scripts/*.sh
       - name: Check
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ github.token }}
           args: --all-targets
-
-  rustfmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-cache
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          components: rustfmt
-      - name: Check
+      - name: Rustfmt
         uses: actions-rs/cargo@v1
         with:
           command: fmt
@@ -69,8 +46,7 @@ jobs:
   build:
     name: Build
     needs:
-      - clippy
-      - rustfmt
+      - lint
     runs-on: ubuntu-latest
     container: quay.io/pypa/manylinux2014_x86_64
     steps:
@@ -80,9 +56,6 @@ jobs:
       - run: yum -y install systemd-devel epel-release
       - run: yum -y install jq
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-cache
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
