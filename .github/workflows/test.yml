@@ -25,7 +25,11 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: clippy, fmt
       - run: shellcheck ./scripts/*.sh
       - run: cargo clippy --all-targets
       - run: cargo fmt --all --check
@@ -43,7 +47,10 @@ jobs:
       - run: yum -y install systemd-devel epel-release
       - run: yum -y install jq
       - uses: actions/checkout@v3
-      - run: rustup toolchain install stable --profile minimal
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
       - name: Build debug test binary
         id: test-debug
         run: cargo test --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
@@ -118,8 +125,12 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - run: rustup toolchain install nightly --component miri
-      - run: rustup toolchain override set nightly
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          components: miri
+          override: true
       - run: cargo +nightly miri setup
       - name: Test
         run: cargo +nightly miri test --all-targets -- --show-output
