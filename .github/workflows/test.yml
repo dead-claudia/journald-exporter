@@ -25,23 +25,10 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          components: clippy
-      - name: Shellcheck
-        run: shellcheck ./scripts/*.sh
-      - name: Check
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ github.token }}
-          args: --all-targets
-      - name: Rustfmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all --check
+      - run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+      - run: shellcheck ./scripts/*.sh
+      - run: cargo clippy --all-targets
+      - run: cargo fmt --all --check
 
   build:
     name: Build
@@ -56,10 +43,7 @@ jobs:
       - run: yum -y install systemd-devel epel-release
       - run: yum -y install jq
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
+      - run: rustup toolchain install stable --profile minimal
       - name: Build debug test binary
         id: test-debug
         run: cargo test --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
@@ -67,10 +51,7 @@ jobs:
         id: test-release
         run: cargo test --release --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
       - name: Build release binary
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
+        run: cargo build --release
       - name: Upload release artifact
         uses: actions/upload-artifact@v3
         with:
@@ -137,25 +118,11 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: miri
-          override: true
-      - name: Setup Miri
-        uses: actions-rs/cargo@v1
-        with:
-          toolchain: nightly
-          command: miri
-          args: setup
+      - run: rustup toolchain install nightly --component miri
+      - run: rustup toolchain override set nightly
+      - run: cargo +nightly miri setup
       - name: Test
-        uses: actions-rs/cargo@v1
-        with:
-          toolchain: nightly
-          command: miri
-          args: --all-targets -- --show-output
+        run: cargo +nightly miri test --all-targets -- --show-output
 
   e2e_tests:
     name: End-to-end tests (release)
