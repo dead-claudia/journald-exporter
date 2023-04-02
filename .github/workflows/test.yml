@@ -137,22 +137,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Download test binary artifact
+        id: download
         uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.binary }}
       - name: Configure test binary permissions
         run: chmod +x $BINARY
         env:
-          BINARY: ${{ matrix.binary }}
+          BINARY: ${{ steps.download.outputs.download-path }}
       - name: Test
         uses: nick-fields/retry@v2
         with:
           timeout_minutes: 2
-          command: ./$BINARY --show-output
+          command: $BINARY --show-output
           # Usually passes the second try if it flakes the first.
           max_attempts: 3
         env:
-          BINARY: ${{ matrix.binary }}
+          BINARY: ${{ steps.download.outputs.download-path }}
 
   miri_tests:
     name: Miri tests
@@ -196,10 +197,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Download release artifact
+        id: download
         uses: actions/download-artifact@v3
         with:
           name: journald-exporter
       - name: Configure release binary permissions
-        run: chmod +x journald-exporter
+        run: chmod +x $BINARY
+        env:
+          BINARY: ${{ steps.download.outputs.download-path }}
       - name: Test
-        run: sudo node ./scripts/e2e.js -b journald-exporter
+        run: sudo node ./scripts/e2e.js -b $BINARY
+        env:
+          BINARY: ${{ steps.download.outputs.download-path }}
