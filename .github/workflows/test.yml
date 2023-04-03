@@ -52,11 +52,17 @@ jobs:
           profile: minimal
           toolchain: stable
       - name: Build debug test binary
-        id: test-debug
-        run: cargo test --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
+        # Have to copy it out to a stable filename so it'll download with a predictable filename
+        # for some reason.
+        run: |
+          FILENAME="$(cargo test --no-run --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
+          cp $FILENAME ./test-debug
       - name: Build release test binary
-        id: test-release
-        run: cargo test --release --no-run --message-format=json | jq -r '"binary=\(select(.profile.test).filenames[])"' > $GITHUB_OUTPUT
+        # Have to copy it out to a stable filename so it'll download with a predictable filename
+        # for some reason.
+        run: |
+          FILENAME="$(cargo test --release --no-run --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
+          cp $FILENAME ./test-release
       - name: Build release binary
         run: cargo build --release
       - name: Upload release artifact
@@ -69,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: test-debug
-          path: ${{ steps.test-debug.outputs.binary }}
+          path: test-debug
           if-no-files-found: error
           # Much shorter retention period as it's mostly used for testing and could get large.
           retention-days: 7
@@ -77,7 +83,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: test-release
-          path: ${{ steps.test-release.outputs.binary }}
+          path: test-release
           if-no-files-found: error
           # Much shorter retention period as it's mostly used for testing and could get large.
           retention-days: 7
@@ -97,27 +103,17 @@ jobs:
         - test-release
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Download test binary artifact
-        id: download
-        uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.binary }}
-      - run: ls -R . $BINARY_PATH
-        env:
-          BINARY_PATH: ${{ steps.download.outputs.download-path }}/
-      - name: Configure test binary permissions
-        run: chmod +x $BINARY
-        env:
-          BINARY: ./${{ matrix.binary }}
+      - run: chmod +x ${{ matrix.binary }}
       - name: Test
         uses: nick-fields/retry@v2
         with:
           timeout_minutes: 2
-          command: $BINARY --show-output
+          command: ./${{ matrix.binary }} --show-output
           # Usually passes the second try if it flakes the first.
           max_attempts: 3
-        env:
-          BINARY: ./${{ matrix.binary }}
 
   miri_tests:
     name: Miri tests
