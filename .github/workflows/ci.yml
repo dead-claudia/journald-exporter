@@ -1,0 +1,25 @@
+on:
+  push:
+    branches:
+      - test
+
+name: CI
+
+jobs:
+  upload_artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'test' > test-artifact
+      - uses: actions/upload-artifact@v3
+        with:
+          name: test-artifact
+          path: test-artifact
+          if-no-files-found: error
+
+  download_artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: test-artifact
+      - run: ls -R
