@@ -102,10 +102,13 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.binary }}
+      - run: ls -R . $BINARY_PATH
+        env:
+          BINARY_PATH: ${{ steps.download.outputs.download-path }}/
       - name: Configure test binary permissions
         run: chmod +x $BINARY
         env:
-          BINARY: ${{ steps.download.outputs.download-path }}/${{ matrix.binary }}
+          BINARY: ./${{ matrix.binary }}
       - name: Test
         uses: nick-fields/retry@v2
         with:
@@ -114,7 +117,7 @@ jobs:
           # Usually passes the second try if it flakes the first.
           max_attempts: 3
         env:
-          BINARY: ${{ steps.download.outputs.download-path }}/${{ matrix.binary }}
+          BINARY: ./${{ matrix.binary }}
 
   miri_tests:
     name: Miri tests
