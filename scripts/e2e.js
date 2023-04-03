@@ -78,7 +78,7 @@ for (const arg of process.argv.slice(2)) {
         }
         argName = undefined
     } else {
-        if (!/^-[ckpdi]$/.test(arg)) bail(`Unknown argument \`${arg}\``)
+        if (!/^-[ckpdib]$/.test(arg)) bail(`Unknown argument \`${arg}\``)
         argName = arg
     }
 }
