@@ -51,17 +51,17 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-      - name: Build debug test binary
+      - name: Build and validate debug test binary
         # Have to copy it out to a stable filename so it'll download with a predictable filename
         # for some reason.
         run: |
-          FILENAME="$(cargo test --no-run --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
+          FILENAME="$(cargo test --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
           cp $FILENAME ./test-debug
-      - name: Build release test binary
+      - name: Build and validate release test binary
         # Have to copy it out to a stable filename so it'll download with a predictable filename
         # for some reason.
         run: |
-          FILENAME="$(cargo test --release --no-run --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
+          FILENAME="$(cargo test --release --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
           cp $FILENAME ./test-release
       - name: Build release binary
         run: cargo build --release
@@ -88,14 +88,13 @@ jobs:
           # Much shorter retention period as it's mostly used for testing and could get large.
           retention-days: 7
 
-  unit_tests:
+  current_unit_tests:
     name: Unit tests
     needs:
       - build
     strategy:
       matrix:
         os:
-        - ubuntu-18.04
         - ubuntu-20.04
         - ubuntu-22.04
         binary:
@@ -118,7 +117,7 @@ jobs:
   miri_tests:
     name: Miri tests
     needs:
-      - unit_tests
+      - current_unit_tests
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get update
@@ -137,7 +136,7 @@ jobs:
   e2e_tests:
     name: End-to-end tests (release)
     needs:
-      - unit_tests
+      - current_unit_tests
     strategy:
       matrix:
         os:
