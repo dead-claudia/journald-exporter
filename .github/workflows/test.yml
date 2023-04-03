@@ -88,7 +88,7 @@ jobs:
           # Much shorter retention period as it's mostly used for testing and could get large.
           retention-days: 7
 
-  current_unit_tests:
+  unit_tests:
     name: Unit tests
     needs:
       - build
@@ -117,7 +117,7 @@ jobs:
   miri_tests:
     name: Miri tests
     needs:
-      - current_unit_tests
+      - unit_tests
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get update
@@ -136,25 +136,17 @@ jobs:
   e2e_tests:
     name: End-to-end tests (release)
     needs:
-      - current_unit_tests
+      - unit_tests
     strategy:
       matrix:
         os:
-        - ubuntu-18.04
         - ubuntu-20.04
         - ubuntu-22.04
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Download release artifact
-        id: download
-        uses: actions/download-artifact@v3
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
         with:
           name: journald-exporter
-      - name: Configure release binary permissions
-        run: chmod +x $BINARY
-        env:
-          BINARY: ${{ steps.download.outputs.download-path }}/journald-exporter
-      - name: Test
-        run: sudo node ./scripts/e2e.js -b $BINARY
-        env:
-          BINARY: ${{ steps.download.outputs.download-path }}/journald-exporter
+      - run: chmod +x journald-exporter
+      - run: sudo node ./scripts/e2e.js -b journald-exporter
