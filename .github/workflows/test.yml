@@ -51,17 +51,17 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-      - name: Build and validate debug test binary
+      - name: Build debug test binary
         # Have to copy it out to a stable filename so it'll download with a predictable filename
         # for some reason.
         run: |
-          FILENAME="$(cargo test --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
+          FILENAME="$(cargo test --no-run --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
           cp $FILENAME ./test-debug
-      - name: Build and validate release test binary
+      - name: Build release test binary
         # Have to copy it out to a stable filename so it'll download with a predictable filename
         # for some reason.
         run: |
-          FILENAME="$(cargo test --release --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
+          FILENAME="$(cargo test --release --no-run --message-format=json | jq -r 'select(.profile.test).filenames[]')" && \
           cp $FILENAME ./test-release
       - name: Build release binary
         run: cargo build --release
