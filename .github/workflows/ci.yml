@@ -1,9 +1,9 @@
 on:
   push:
     branches:
-      - test
+      - ci-test
 
-name: CI
+name: Run test action
 
 jobs:
   upload_artifact:
@@ -17,6 +17,8 @@ jobs:
           if-no-files-found: error
 
   download_artifact:
+    needs:
+      - upload_artifact
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v3
