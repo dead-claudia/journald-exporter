@@ -188,8 +188,14 @@ function fetchLoop(parentSignal, terminateHandler) {
 
 function runChildTest() {
     const child = child_process.spawn(
-        args.binary,
-        ["--port", args.port, "--key-dir", args.keyDir],
+        "systemd-run",
+        [
+            "--wait", "--quiet", "--pty", "--pipe", "--collect",
+            "--property=Type=notify",
+            "--property=WatchdogSec=5s",
+            "--property=TimeoutStartSec=5s",
+            args.binary, "--port", args.port, "--key-dir", args.keyDir,
+        ],
         {stdio: "inherit"},
     )
 
