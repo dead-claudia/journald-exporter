@@ -50,7 +50,7 @@ This is all written in Rust for simplicity and performance.
 
     [Service]
     Type=notify
-    ExecStart=/usr/sbin/journald-exporter --path /etc/journald-exporter/keys --port 12345
+    ExecStart=/usr/sbin/journald-exporter --key-dir /etc/journald-exporter/keys --port 12345
     WatchdogSec=5m
     Restart=always
     # And a number of security settings to lock down the program as best as
