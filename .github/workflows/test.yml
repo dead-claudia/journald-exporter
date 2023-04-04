@@ -25,10 +25,13 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: clippy, rustfmt
+      - name: Install Rustup (if needed)
+        run: |
+          if ! command -v rustup &>/dev/null; then
+            curl --proto '=https' --tlsv1.2 --retry 10 -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
+            echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
+          fi
+      - run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
       - run: shellcheck ./scripts/*.sh
       - run: cargo clippy --all-targets
       - run: cargo fmt --all --check
@@ -46,9 +49,13 @@ jobs:
       - run: yum -y install systemd-devel epel-release
       - run: yum -y install jq
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: stable
+      - name: Install Rustup (if needed)
+        run: |
+          if ! command -v rustup &>/dev/null; then
+            curl --proto '=https' --tlsv1.2 --retry 10 -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
+            echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
+          fi
+      - run: rustup toolchain install stable --profile minimal
       - name: Build debug test binary
         # Have to copy it out to a stable filename so it'll download with a predictable filename
         # for some reason.
@@ -121,14 +128,16 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-          components: miri
+      - name: Install Rustup (if needed)
+        run: |
+          if ! command -v rustup &>/dev/null; then
+            curl --proto '=https' --tlsv1.2 --retry 10 -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
+            echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
+          fi
+      - run: rustup toolchain install nightly --profile minimal --component miri
       - run: rustup override set nightly
       - run: cargo +nightly miri setup
-      - name: Test
-        run: cargo +nightly miri test --all-targets -- --show-output
+      - run: cargo +nightly miri test --all-targets -- --show-output
 
   e2e_tests:
     name: End-to-end tests (release)
