@@ -28,7 +28,7 @@ jobs:
       - name: Install Rustup (if needed)
         run: |
           if ! command -v rustup &>/dev/null; then
-            curl --proto '=https' --tlsv1.2 --retry 10 -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
+            curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
             echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
           fi
       - run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
@@ -50,6 +50,7 @@ jobs:
       - run: yum -y install jq
       - uses: actions/checkout@v3
       - name: Install Rustup (if needed)
+        # This lacks the `--retry-connrefused` flag as the version of cURL here is pretty ancient
         run: |
           if ! command -v rustup &>/dev/null; then
             curl --proto '=https' --tlsv1.2 --retry 10 -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
@@ -131,7 +132,7 @@ jobs:
       - name: Install Rustup (if needed)
         run: |
           if ! command -v rustup &>/dev/null; then
-            curl --proto '=https' --tlsv1.2 --retry 10 -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
+            curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --default-toolchain none -y
             echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
           fi
       - run: rustup toolchain install nightly --profile minimal --component miri
