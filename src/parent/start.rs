@@ -156,6 +156,13 @@ fn resolve_parent_return() -> io::Result<ExitResult> {
     let journal_handle = ThreadHandle::spawn(journal_task());
     let key_updater_handle = ThreadHandle::spawn(key_updater_task());
 
+    static READY_MSG: &std::ffi::CStr = c_str(b"READY=1\0");
+
+    NATIVE_JOURNAL_PROVIDER
+        .get()
+        .unwrap()
+        .sd_notify(READY_MSG)?;
+
     let mut result = Ok(WAIT_CHECKPOINT.wait().exit_result);
 
     if let Err(e) = parent_ipc_handle.join() {

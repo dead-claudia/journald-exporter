@@ -17,19 +17,7 @@ pub struct NativeSystemdProvider {
 
 impl SystemdProvider for NativeSystemdProvider {
     fn watchdog_notify(&self) -> io::Result<()> {
-        if self.watchdog_enabled {
-            // SAFETY: It's just invoking the native systemd function, and invariants are upheld via the
-            // function's type.
-            let result = sd_check("sd_notify", unsafe {
-                daemon::sd_notify(0, WATCHDOG_MSG.as_ptr())
-            })?;
-
-            if result == 0 {
-                return Err(ErrorKind::NotConnected.into());
-            }
-        }
-
-        Ok(())
+        self.sd_notify(WATCHDOG_MSG)
     }
 
     fn boot_id(&self) -> Id128 {
@@ -86,6 +74,20 @@ impl NativeSystemdProvider {
             watchdog_enabled,
             Id128::get_from_boot()?,
         ))
+    }
+
+    pub fn sd_notify(&self, msg: &CStr) -> io::Result<()> {
+        if self.watchdog_enabled {
+            // SAFETY: It's just invoking the native systemd function, and invariants are upheld via the
+            // function's type.
+            let result = sd_check("sd_notify", unsafe { daemon::sd_notify(0, msg.as_ptr()) })?;
+
+            if result == 0 {
+                return Err(ErrorKind::NotConnected.into());
+            }
+        }
+
+        Ok(())
     }
 }
 
