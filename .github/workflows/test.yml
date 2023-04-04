@@ -25,9 +25,8 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: stable
           components: clippy, rustfmt
       - run: shellcheck ./scripts/*.sh
@@ -47,9 +46,8 @@ jobs:
       - run: yum -y install systemd-devel epel-release
       - run: yum -y install jq
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: stable
       - name: Build debug test binary
         # Have to copy it out to a stable filename so it'll download with a predictable filename
@@ -123,12 +121,11 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly
           components: miri
-          override: true
+      - run: rustup override set nightly
       - run: cargo +nightly miri setup
       - name: Test
         run: cargo +nightly miri test --all-targets -- --show-output
