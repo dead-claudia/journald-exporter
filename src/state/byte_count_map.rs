@@ -3,33 +3,15 @@ use crate::prelude::*;
 use super::ByteCountTableKey;
 use super::MessageKey;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone, Copy))]
 pub struct ByteCountSnapshotEntry {
     pub key: MessageKey,
     pub lines: u64,
     pub bytes: u64,
 }
 
-#[cfg(test)]
-impl Arbitrary for ByteCountSnapshotEntry {
-    fn arbitrary(g: &mut Gen) -> Self {
-        Self {
-            key: Arbitrary::arbitrary(g),
-            lines: Arbitrary::arbitrary(g),
-            bytes: Arbitrary::arbitrary(g),
-        }
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(
-            (self.key.clone(), self.lines, self.bytes)
-                .shrink()
-                .map(|(key, lines, bytes)| Self { key, lines, bytes }),
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ByteCountSnapshot {
     pub data: Box<[ByteCountSnapshotEntry]>,
 }
@@ -41,24 +23,6 @@ impl ByteCountSnapshot {
     }
 }
 
-#[cfg(test)]
-impl Arbitrary for ByteCountSnapshot {
-    fn arbitrary(g: &mut Gen) -> Self {
-        let data: Vec<_> = Arbitrary::arbitrary(g);
-        Self { data: data.into() }
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(
-            self.data
-                .to_vec()
-                .shrink()
-                .map(|data| Self { data: data.into() }),
-        )
-    }
-}
-
-#[derive(Clone)]
 struct ByteCountData {
     lines: Counter,
     bytes: Counter,
@@ -104,44 +68,50 @@ impl ByteCountMap {
             let read_lock = entry.read().unwrap_or_else(|e| e.into_inner());
             for ByteCountTableEntry { key, data } in read_lock.iter() {
                 result.push(ByteCountSnapshotEntry {
-                    key: MessageKey::from_table_key(priority, key),
+                    key: MessageKey::copy_from_table_entry(priority, key),
                     lines: data.lines.current(),
                     bytes: data.bytes.current(),
-                })
+                });
             }
         }
-        ByteCountSnapshot {
-            data: result.into(),
-        }
+        let mut data: Box<[_]> = result.into();
+        data.sort_by(|a, b| a.key.cmp(&b.key));
+        ByteCountSnapshot { data }
     }
 
     // Take a reference to avoid a copy.
     pub fn push_line(&self, key: &MessageKey, msg_len: usize) {
-        let msg_len = zero_extend_usize_u64(msg_len);
-
         // Services are very rarely added. Try opening a read first and doing atomic updates, and
         // fall back to a write lock if the entry doesn't exist yet. Contention should already be
         // low as-is since only two threads could be accessing the map, and it's further reduced by
         // the indirection on priority/severity level.
         //
         // Using an upgradable lock so I don't need to drop and re-acquire it.
-        let priority_index = zero_extend_u8_usize(key.priority().as_severity_index());
+        let priority_index = zero_extend_u8_usize(key.priority.as_severity_index());
         let read_lock = self.priority_table[priority_index]
             .read()
             .unwrap_or_else(|e| e.into_inner());
 
-        for entry in read_lock.iter() {
-            if &entry.key == key.as_table_key() {
-                entry.data.lines.increment();
-                entry.data.bytes.increment_by(msg_len);
-                return;
-            }
+        if !find_and_increment(&read_lock, key, msg_len) {
+            // Don't deadlock. Drop the lock before entering the fallback path.
+            drop(read_lock);
+            push_line_likely_new(&self.priority_table[priority_index], key, msg_len);
         }
 
-        // Don't deadlock. Drop the lock before entering the fallback path.
-        drop(read_lock);
-
-        push_line_likely_new(&self.priority_table[priority_index], key, msg_len);
+        fn find_and_increment(
+            entries: &[ByteCountTableEntry],
+            key: &MessageKey,
+            msg_len: usize,
+        ) -> bool {
+            match entries.iter().find(|entry| entry.key == key.table_key) {
+                None => false,
+                Some(ByteCountTableEntry { data, .. }) => {
+                    data.lines.increment();
+                    data.bytes.increment_by(zero_extend_usize_u64(msg_len));
+                    true
+                }
+            }
+        }
 
         // Here's why I want to keep this fully out of the hot path:
         // - There's normally only like a few hundred services active. *Maybe* a thousand on machines
@@ -159,175 +129,321 @@ impl ByteCountMap {
         fn push_line_likely_new(
             priority_entry: &RwLock<Vec<ByteCountTableEntry>>,
             key: &MessageKey,
-            msg_len: u64,
+            msg_len: usize,
         ) {
             // Entry doesn't exist. Time to acquire a write lock and update the hash map with a
             // possible new key.
             let mut write_lock = priority_entry.write().unwrap_or_else(|e| e.into_inner());
 
-            for entry in write_lock.iter() {
-                if &entry.key == key.as_table_key() {
-                    entry.data.lines.increment();
-                    entry.data.bytes.increment_by(msg_len);
-                    return;
-                }
+            if !find_and_increment(&write_lock, key, msg_len) {
+                // While this may reallocate a lot at first, it's unlikely to reallocate too much
+                // after that, since there's only so many system services. This is why it doesn't
+                // try to pre-allocate - it's just not needed.
+
+                // It's not copyable in production, as it's supposed to be minimally copied in
+                // general (in no small part due to its size).
+                #[allow(clippy::clone_on_copy)]
+                let table_key = key.table_key.clone();
+
+                write_lock.push(ByteCountTableEntry {
+                    data: ByteCountData {
+                        lines: Counter::new(1),
+                        bytes: Counter::new(zero_extend_usize_u64(msg_len)),
+                    },
+                    key: table_key,
+                });
             }
-
-            // While this may reallocate a lot at first, it's unlikely to reallocate too much after
-            // that, since there's only so many system services. This is why it doesn't try to
-            // pre-allocate - it's just not needed.
-
-            write_lock.push(ByteCountTableEntry {
-                data: ByteCountData {
-                    lines: Counter::new(1),
-                    bytes: Counter::new(msg_len),
-                },
-                key: key.as_table_key().clone(),
-            });
         }
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
-    fn map_key(s: &str) -> MessageKey {
-        let mut key = MessageKey::new();
-        key.set_service(Service::from_slice(s.as_bytes()).unwrap());
-        key.set_priority(crate::common::Priority::Informational);
-        key
+    const fn map_key(s: &[u8]) -> MessageKey {
+        MessageKey::build(None, None, Some(s), Priority::Informational)
     }
 
     fn actual_snapshot(s: &'static PromState) -> PromSnapshot {
         s.snapshot()
     }
 
-    fn expected_snapshot(expected: &[(MessageKey, u64, u64)]) -> PromSnapshot {
-        let mut expected = Vec::from_iter(
-            expected
-                .iter()
-                .cloned()
-                .map(|(key, lines, bytes)| ByteCountSnapshotEntry { key, lines, bytes }),
-        );
-        expected.sort_by(|a, b| a.key.cmp(&b.key));
-
-        PromSnapshot {
-            entries_ingested: 0,
-            fields_ingested: 0,
-            data_bytes_ingested: 0,
-            faults: 0,
-            cursor_double_retries: 0,
-            unreadable_fields: 0,
-            corrupted_fields: 0,
-            requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: expected.into(),
-            },
-        }
-    }
-
     #[test]
-    fn byte_count_map_works_on_one_thread() {
+    fn works_on_one_thread() {
         static S: PromState = PromState::new();
 
-        S.add_message_line_ingested(&map_key("one"), 123);
-        S.add_message_line_ingested(&map_key("one"), 456);
-        S.add_message_line_ingested(&map_key("two"), 789);
-        S.add_message_line_ingested(&map_key("three"), 555);
-        S.add_message_line_ingested(&map_key("three"), 444);
+        S.add_message_line_ingested(&map_key(b"one"), 123);
+        S.add_message_line_ingested(&map_key(b"one"), 456);
+        S.add_message_line_ingested(&map_key(b"two"), 789);
+        S.add_message_line_ingested(&map_key(b"three"), 555);
+        S.add_message_line_ingested(&map_key(b"three"), 444);
+
+        const EXPECTED_DATA: [ByteCountSnapshotEntry; 3] = [
+            ByteCountSnapshotEntry {
+                key: map_key(b"one"),
+                lines: 2,
+                bytes: 579,
+            },
+            ByteCountSnapshotEntry {
+                key: map_key(b"two"),
+                lines: 1,
+                bytes: 789,
+            },
+            ByteCountSnapshotEntry {
+                key: map_key(b"three"),
+                lines: 2,
+                bytes: 999,
+            },
+        ];
 
         assert_eq!(
             actual_snapshot(&S),
-            expected_snapshot(&[
-                (map_key("one"), 2, 579),
-                (map_key("two"), 1, 789),
-                (map_key("three"), 2, 999),
-            ])
+            PromSnapshot {
+                entries_ingested: 0,
+                fields_ingested: 0,
+                data_ingested_bytes: 0,
+                faults: 0,
+                cursor_double_retries: 0,
+                unreadable_fields: 0,
+                corrupted_fields: 0,
+                metrics_requests: 0,
+                messages_ingested: ByteCountSnapshot {
+                    data: EXPECTED_DATA.into(),
+                },
+            }
         );
     }
 
-    fn test_contends(state: &'static PromState, thread_count: u64) {
-        let keys = [
-            map_key("test_1"),
-            map_key("test_2"),
-            map_key("test_3"),
-            map_key("test_4"),
-            map_key("test_5"),
-            map_key("test_6"),
-            map_key("test_7"),
-            map_key("test_8"),
-            map_key("test_9"),
-            map_key("test_10"),
-            map_key("test_11"),
-            map_key("test_12"),
-            map_key("test_13"),
-            map_key("test_14"),
-            map_key("test_15"),
-            map_key("test_16"),
-        ];
+    const KEYS: [MessageKey; 16] = [
+        map_key(b"test_1"),
+        map_key(b"test_2"),
+        map_key(b"test_3"),
+        map_key(b"test_4"),
+        map_key(b"test_5"),
+        map_key(b"test_6"),
+        map_key(b"test_7"),
+        map_key(b"test_8"),
+        map_key(b"test_9"),
+        map_key(b"test_10"),
+        map_key(b"test_11"),
+        map_key(b"test_12"),
+        map_key(b"test_13"),
+        map_key(b"test_14"),
+        map_key(b"test_15"),
+        map_key(b"test_16"),
+    ];
 
-        let mut contends = Vec::new();
-
-        for id in 1..=thread_count {
-            std::thread::scope(|s| {
-                // Ensure each borrow is unique, so I can `move` the contends list into the
-                // closure.
-                let keys_list = &keys;
-                let contends_list = [
-                    map_key(&format!("contend_{id}_1")),
-                    map_key(&format!("contend_{id}_2")),
-                    map_key(&format!("contend_{id}_3")),
-                    map_key(&format!("contend_{id}_4")),
-                    map_key(&format!("contend_{id}_5")),
-                    map_key(&format!("contend_{id}_6")),
-                    map_key(&format!("contend_{id}_7")),
-                    map_key(&format!("contend_{id}_8")),
-                    map_key(&format!("contend_{id}_9")),
-                    map_key(&format!("contend_{id}_10")),
-                ];
-
-                contends.extend(contends_list.iter().cloned());
-
-                s.spawn(move || {
-                    let mut contends = contends_list.iter().cycle();
-                    for i in 1..=100 {
-                        for key in keys_list.iter() {
-                            state.add_message_line_ingested(key, 10);
-                        }
-                        if i % 10 == 5 {
-                            state.add_message_line_ingested(contends.next().unwrap(), 1);
-                        }
-                    }
-                });
-            });
+    fn test_contends_inner(state: &PromState, contends_list: &[MessageKey; 10]) {
+        let mut test_modulo = 9_usize;
+        for i in 1..=100 {
+            for key in &KEYS {
+                state.add_message_line_ingested(key, 10);
+            }
+            if i % 10 == test_modulo {
+                test_modulo = test_modulo.wrapping_sub(1);
+                state.add_message_line_ingested(&contends_list[i / 10], 1);
+            }
         }
-
-        let mut expected = Vec::with_capacity(keys.len() + contends.len());
-
-        for key in keys {
-            expected.push((key, 100 * thread_count, 1000 * thread_count));
-        }
-
-        for key in contends {
-            expected.push((key, 1, 1));
-        }
-
-        assert_eq!(actual_snapshot(state), expected_snapshot(&expected));
     }
 
     #[test]
-    fn byte_count_map_works_on_two_contending_threads() {
+    fn works_on_two_contending_threads() {
+        // Pre-allocate everything so it won't take a long time to run with all the allocations.
+        // This is one of the slowest tests in Miri, so it's particularly helpful here.
         static S: PromState = PromState::new();
-        test_contends(&S, 2);
+
+        static CONTENDS_0: [MessageKey; 10] = [
+            map_key(b"contend_0_0"),
+            map_key(b"contend_0_1"),
+            map_key(b"contend_0_2"),
+            map_key(b"contend_0_3"),
+            map_key(b"contend_0_4"),
+            map_key(b"contend_0_5"),
+            map_key(b"contend_0_6"),
+            map_key(b"contend_0_7"),
+            map_key(b"contend_0_8"),
+            map_key(b"contend_0_9"),
+        ];
+
+        static CONTENDS_1: [MessageKey; 10] = [
+            map_key(b"contend_1_0"),
+            map_key(b"contend_1_1"),
+            map_key(b"contend_1_2"),
+            map_key(b"contend_1_3"),
+            map_key(b"contend_1_4"),
+            map_key(b"contend_1_5"),
+            map_key(b"contend_1_6"),
+            map_key(b"contend_1_7"),
+            map_key(b"contend_1_8"),
+            map_key(b"contend_1_9"),
+        ];
+
+        #[rustfmt::skip]
+        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &[
+            ByteCountSnapshotEntry { key: map_key(b"test_1"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_2"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_3"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_4"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_5"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_6"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_7"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_8"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_9"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_10"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_11"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_12"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_13"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_14"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_15"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"test_16"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_0"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_1"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_2"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_3"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_4"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_5"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_6"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_7"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_8"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_0_9"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_0"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_1"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_2"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_3"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_4"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_5"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_6"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_7"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_8"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { key: map_key(b"contend_1_9"), lines: 1, bytes: 1 },
+        ];
+
+        std::thread::scope(|s| {
+            s.spawn(move || test_contends_inner(&S, &CONTENDS_0));
+            s.spawn(move || test_contends_inner(&S, &CONTENDS_1));
+        });
+
+        assert_eq!(
+            actual_snapshot(&S),
+            PromSnapshot {
+                entries_ingested: 0,
+                fields_ingested: 0,
+                data_ingested_bytes: 0,
+                faults: 0,
+                cursor_double_retries: 0,
+                unreadable_fields: 0,
+                corrupted_fields: 0,
+                metrics_requests: 0,
+                messages_ingested: ByteCountSnapshot {
+                    data: EXPECTED_DATA.into(),
+                },
+            }
+        );
     }
 
     // Complete overkill, but specifically just trying to stress-test contention.
     #[test]
-    // Extremely slow in Miri. Just skip it.
+    // Extremely slow in Miri (might very well take over an hour). Just skip it.
     #[cfg_attr(miri, ignore)]
-    fn byte_count_map_works_on_a_hundred_contending_threads() {
+    fn works_on_a_hundred_contending_threads() {
+        // Pre-allocate everything so it won't take a long time to run with all the allocations.
         static S: PromState = PromState::new();
-        test_contends(&S, 100);
+
+        const CONTENDS_LISTS: [[MessageKey; 10]; 100] = {
+            let inner = [map_key(b"placeholder"); 10];
+            let mut result = [inner; 100];
+            let mut i = 0;
+            while i < 100 {
+                let mut j = 0;
+                let tens = b'0'.wrapping_add(i / 10);
+                let ones = b'0'.wrapping_add(i % 10);
+                let mut inner = inner;
+                while j < 10 {
+                    let last = b'0'.wrapping_add(j);
+                    let mut base = *b"contend_00_0";
+                    base[8] = tens;
+                    base[9] = ones;
+                    base[11] = last;
+                    inner[zero_extend_u8_usize(j)] = map_key(&base);
+                    j += 1;
+                }
+                result[zero_extend_u8_usize(i)] = inner;
+                i += 1;
+            }
+            result
+        };
+
+        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &{
+            let mut result = [ByteCountSnapshotEntry {
+                key: map_key(b"placeholder"),
+                lines: 1,
+                bytes: 1,
+            }; KEYS.len() + 1000];
+
+            // Don't format this bit. It'll just make this less readable.
+            #[rustfmt::skip]
+            #[allow(clippy::let_unit_value)]
+            let _ = {
+                result[0] = ByteCountSnapshotEntry { key: map_key(b"test_1"), lines: 10_000, bytes: 100_000 };
+                result[1] = ByteCountSnapshotEntry { key: map_key(b"test_2"), lines: 10_000, bytes: 100_000 };
+                result[2] = ByteCountSnapshotEntry { key: map_key(b"test_3"), lines: 10_000, bytes: 100_000 };
+                result[3] = ByteCountSnapshotEntry { key: map_key(b"test_4"), lines: 10_000, bytes: 100_000 };
+                result[4] = ByteCountSnapshotEntry { key: map_key(b"test_5"), lines: 10_000, bytes: 100_000 };
+                result[5] = ByteCountSnapshotEntry { key: map_key(b"test_6"), lines: 10_000, bytes: 100_000 };
+                result[6] = ByteCountSnapshotEntry { key: map_key(b"test_7"), lines: 10_000, bytes: 100_000 };
+                result[7] = ByteCountSnapshotEntry { key: map_key(b"test_8"), lines: 10_000, bytes: 100_000 };
+                result[8] = ByteCountSnapshotEntry { key: map_key(b"test_9"), lines: 10_000, bytes: 100_000 };
+                result[9] = ByteCountSnapshotEntry { key: map_key(b"test_10"), lines: 10_000, bytes: 100_000 };
+                result[10] = ByteCountSnapshotEntry { key: map_key(b"test_11"), lines: 10_000, bytes: 100_000 };
+                result[11] = ByteCountSnapshotEntry { key: map_key(b"test_12"), lines: 10_000, bytes: 100_000 };
+                result[12] = ByteCountSnapshotEntry { key: map_key(b"test_13"), lines: 10_000, bytes: 100_000 };
+                result[13] = ByteCountSnapshotEntry { key: map_key(b"test_14"), lines: 10_000, bytes: 100_000 };
+                result[14] = ByteCountSnapshotEntry { key: map_key(b"test_15"), lines: 10_000, bytes: 100_000 };
+                result[15] = ByteCountSnapshotEntry { key: map_key(b"test_16"), lines: 10_000, bytes: 100_000 };
+            };
+
+            let mut target = 16;
+            let mut i = 0;
+            while i < CONTENDS_LISTS.len() {
+                let entry = &CONTENDS_LISTS[i];
+                let mut j = 0;
+                while j < entry.len() {
+                    result[target] = ByteCountSnapshotEntry {
+                        key: entry[j],
+                        lines: 1,
+                        bytes: 1,
+                    };
+                    j += 1;
+                    target += 1;
+                }
+                i += 1;
+            }
+
+            result
+        };
+
+        std::thread::scope(|s| {
+            for list in &CONTENDS_LISTS {
+                s.spawn(move || test_contends_inner(&S, list));
+            }
+        });
+
+        assert_eq!(
+            actual_snapshot(&S),
+            PromSnapshot {
+                entries_ingested: 0,
+                fields_ingested: 0,
+                data_ingested_bytes: 0,
+                faults: 0,
+                cursor_double_retries: 0,
+                unreadable_fields: 0,
+                corrupted_fields: 0,
+                metrics_requests: 0,
+                messages_ingested: ByteCountSnapshot {
+                    data: EXPECTED_DATA.into(),
+                },
+            }
+        );
     }
 }

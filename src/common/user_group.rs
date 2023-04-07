@@ -2,7 +2,8 @@ use crate::prelude::*;
 
 const MAX_NAME_LEN: usize = 32;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone, Copy))]
 pub struct IdName {
     len: u8,
     data: [u8; MAX_NAME_LEN],
@@ -35,92 +36,9 @@ impl std::ops::Deref for IdName {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ArbitraryNamePart(u8);
-
-// `Vec::from_iter(1..=MAX_NAME_LEN)`, but static.
-#[cfg(test)]
-static NAME_LENGTHS: &[usize] = &{
-    let mut key_lengths = [1; MAX_NAME_LEN];
-    let mut i = 0;
-    while i < key_lengths.len() {
-        key_lengths[i] = i + 1;
-        i += 1;
-    }
-    key_lengths
-};
-
-// Note: these must remain sorted by code point.
-#[cfg(test)]
-static NAME_START_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
-#[cfg(test)]
-static NAME_PART_CHARS: &[u8] = b"-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
-
-#[cfg(test)]
-fn shrink_array(array: &[u8], prev: u8) -> impl Iterator<Item = u8> + '_ {
-    array.iter().cloned().take_while(move |c| *c < prev)
-}
-
-#[cfg(test)]
-impl Arbitrary for ArbitraryNamePart {
-    fn arbitrary(g: &mut Gen) -> Self {
-        Self(*g.choose(NAME_PART_CHARS).unwrap())
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(shrink_array(NAME_PART_CHARS, self.0).map(Self))
-    }
-}
-
-#[cfg(test)]
-fn is_valid_name(bytes: &[u8]) -> bool {
-    if bytes.len() > MAX_NAME_LEN {
-        return false;
-    }
-
-    let Some((head, tail)) = bytes.split_first() else {
-            return false;
-        };
-
-    matches!(*head, b'_' | b'A'..=b'Z' | b'a'..=b'z')
-        && tail
-            .iter()
-            .all(|b| matches!(*b, b'0'..=b'9' | b'_' | b'-' | b'A'..=b'Z' | b'a'..=b'z'))
-}
-
-#[cfg(test)]
-impl Arbitrary for IdName {
-    fn arbitrary(g: &mut Gen) -> Self {
-        let mut result = Vec::new();
-        let len = *g.choose(NAME_LENGTHS).unwrap();
-
-        result.push(*g.choose(NAME_START_CHARS).unwrap());
-
-        for _ in 2..len {
-            result.push(*g.choose(NAME_PART_CHARS).unwrap());
-        }
-
-        Self::new(&result)
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let data = self.clone();
-        let (&head, tail) = data.split_first().unwrap();
-        let tail = Vec::from_iter(tail.iter().cloned().map(ArbitraryNamePart));
-
-        Box::new(shrink_array(NAME_START_CHARS, head).flat_map(move |head| {
-            tail.shrink().map(move |v| {
-                Self::new(&Vec::from_iter(
-                    std::iter::once(head).chain(v.into_iter().map(|c| c.0)),
-                ))
-            })
-        }))
-    }
-}
-
 // There's relatively few of these (like on the scale of ones to tens), and it's only looked
 // through once every minute. It doesn't need to be an entire hash map.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct IdTable {
     entries: Box<[(u32, IdName)]>,
 }
@@ -129,11 +47,11 @@ impl IdTable {
     #[cfg(test)]
     pub fn from_entries(slice: &[(u32, IdName)]) -> Self {
         Self {
-            entries: slice.to_vec().into(),
+            entries: slice.into(),
         }
     }
 
-    pub fn lookup_key(&self, search_key: &[u8]) -> Option<u32> {
+    pub fn lookup_name(&self, search_key: &[u8]) -> Option<u32> {
         self.entries
             .iter()
             .find_map(|(id, name)| (&**name == search_key).then_some(*id))
@@ -146,10 +64,10 @@ impl IdTable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct UidGidTable {
-    uid_table: IdTable,
-    gid_table: IdTable,
+    pub uids: IdTable,
+    pub gids: IdTable,
 }
 
 impl UidGidTable {
@@ -157,17 +75,9 @@ impl UidGidTable {
     /// serialized sequence of a user table + group table.
     pub const fn new(uid_table: IdTable, gid_table: IdTable) -> UidGidTable {
         UidGidTable {
-            uid_table,
-            gid_table,
+            uids: uid_table,
+            gids: gid_table,
         }
-    }
-
-    pub fn lookup_uid(&self, uid: Uid) -> Option<&IdName> {
-        self.uid_table.lookup_id(uid.into())
-    }
-
-    pub fn lookup_gid(&self, gid: Gid) -> Option<&IdName> {
-        self.gid_table.lookup_id(gid.into())
     }
 
     /// Pass the result of `parse_etc_passwd_etc_group` as `user_group_count` and the decoded
@@ -176,16 +86,21 @@ impl UidGidTable {
     /// This may seem out of place functionally, but this is where the data is defined, and I want
     /// to be able to better maintain the inner data structure.
     #[cold]
-    pub fn lookup_user_group(
-        &self,
-        search_user: &[u8],
-        search_group: &[u8],
-    ) -> (Option<Uid>, Option<Gid>) {
-        (
-            self.uid_table.lookup_key(search_user).map(Uid::from),
-            self.gid_table.lookup_key(search_group).map(Gid::from),
-        )
+    pub fn lookup_user_group(&self, search_user: &[u8], search_group: &[u8]) -> Option<UserGroup> {
+        match (
+            self.uids.lookup_name(search_user),
+            self.gids.lookup_name(search_group),
+        ) {
+            (Some(uid), Some(gid)) => Some(UserGroup { uid, gid }),
+            _ => None,
+        }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct UserGroup {
+    pub uid: u32,
+    pub gid: u32,
 }
 
 /*
@@ -314,46 +229,5 @@ pub fn parse_etc_passwd_etc_group(data: &[u8]) -> IdTable {
 
     IdTable {
         entries: names.into(),
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    // These tests are ignored by Miri as 1. they take a while and 2. the things they're checking
-    // are only used in test anyways.
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn test_name_start_chars_are_sorted() {
-        let mut sorted = NAME_START_CHARS.to_vec();
-        sorted.sort();
-        assert_eq!(&*sorted, NAME_START_CHARS);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn test_name_part_chars_are_sorted() {
-        let mut sorted = NAME_PART_CHARS.to_vec();
-        sorted.sort();
-        assert_eq!(&*sorted, NAME_PART_CHARS);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn test_name_chars_are_correct() {
-        for first in 0..=u8::MAX {
-            for second in 0..=u8::MAX {
-                let expected_is_valid =
-                    NAME_START_CHARS.contains(&first) && NAME_PART_CHARS.contains(&second);
-
-                assert!(
-                    is_valid_name(&[first, second]) == expected_is_valid,
-                    "\"{}\"",
-                    BinaryToDisplay(&[first, second])
-                );
-            }
-        }
     }
 }

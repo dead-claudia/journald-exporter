@@ -8,19 +8,11 @@ use crate::ffi::set_non_blocking;
 use crate::ffi::ExitCode;
 use crate::ffi::ExitResult;
 use std::net::Ipv4Addr;
-use std::time::SystemTime;
 
 static SERVER_STATE: ServerState<TinyHttpRequestContext> = ServerState::new();
 static NOTIFY_EXIT: Notify = Notify::new();
 
 pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
-    // Kill this child if the parent dies. Easier than trying to wire up the parent somehow while
-    // testing.
-    // SAFETY: doesn't impact any Rust-visible memory.
-    unsafe {
-        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-    }
-
     // Set the standard input and output to non-blocking mode so reads will correctly not block.
     set_non_blocking(libc::STDIN_FILENO)?;
     set_non_blocking(libc::STDOUT_FILENO)?;
@@ -31,9 +23,6 @@ pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
     let shared = RequestShared {
         state: &SERVER_STATE,
         output: io::stdout(),
-        environment: PromEnvironment {
-            created: SystemTime::now(),
-        },
         initialized: Instant::now(),
     };
 

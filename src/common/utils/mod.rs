@@ -1,19 +1,23 @@
 mod ascii;
-mod c_str;
-mod copy_to_start;
+mod assert_not_miri;
 mod counter;
+mod error;
+mod fixed_c_string;
 mod int_extend_truncate;
 mod ipc_read_write;
 mod notify;
 mod parse_int;
+mod slice;
 mod uncontended;
 
 pub use self::ascii::*;
-pub use self::c_str::*;
-pub use self::copy_to_start::*;
+pub use self::assert_not_miri::*;
 pub use self::counter::*;
+pub use self::error::*;
+pub use self::fixed_c_string::*;
 pub use self::int_extend_truncate::*;
 pub use self::ipc_read_write::*;
 pub use self::notify::*;
 pub use self::parse_int::*;
+pub use self::slice::*;
 pub use self::uncontended::*;

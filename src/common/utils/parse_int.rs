@@ -9,38 +9,45 @@ pub fn parse_u32(bytes: &[u8]) -> Option<u32> {
     if bytes.is_empty() {
         None
     } else {
-        bytes.iter().copied().try_fold(0, parse_u32_digit)
+        let mut acc = 0;
+
+        for &byte in bytes {
+            acc = parse_u32_digit(acc, byte)?;
+        }
+
+        Some(acc)
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::prelude::*;
 
     use super::*;
 
     #[quickcheck]
     fn parse_u32_digit_works(a: u32, b: u8) -> bool {
-        match (a, b) {
-            #[allow(clippy::identity_op)]
-            (a @ 0..=429496728, b @ b'0') => parse_u32_digit(a, b) == Some(a * 10 + 0),
-            (a @ 0..=429496728, b @ b'1') => parse_u32_digit(a, b) == Some(a * 10 + 1),
-            (a @ 0..=429496728, b @ b'2') => parse_u32_digit(a, b) == Some(a * 10 + 2),
-            (a @ 0..=429496728, b @ b'3') => parse_u32_digit(a, b) == Some(a * 10 + 3),
-            (a @ 0..=429496728, b @ b'4') => parse_u32_digit(a, b) == Some(a * 10 + 4),
-            (a @ 0..=429496728, b @ b'5') => parse_u32_digit(a, b) == Some(a * 10 + 5),
-            (a @ 0..=429496728, b @ b'6') => parse_u32_digit(a, b) == Some(a * 10 + 6),
-            (a @ 0..=429496728, b @ b'7') => parse_u32_digit(a, b) == Some(a * 10 + 7),
-            (a @ 0..=429496728, b @ b'8') => parse_u32_digit(a, b) == Some(a * 10 + 8),
-            (a @ 0..=429496728, b @ b'9') => parse_u32_digit(a, b) == Some(a * 10 + 9),
-            (a @ 429496729, b @ b'0') => parse_u32_digit(a, b) == Some(4294967290),
-            (a @ 429496729, b @ b'1') => parse_u32_digit(a, b) == Some(4294967291),
-            (a @ 429496729, b @ b'2') => parse_u32_digit(a, b) == Some(4294967292),
-            (a @ 429496729, b @ b'3') => parse_u32_digit(a, b) == Some(4294967293),
-            (a @ 429496729, b @ b'4') => parse_u32_digit(a, b) == Some(4294967294),
-            (a @ 429496729, b @ b'5') => parse_u32_digit(a, b) == Some(4294967295),
-            (a, b) => parse_u32_digit(a, b).is_none(),
-        }
+        parse_u32_digit(a, b)
+            == match (a, b) {
+                #[allow(clippy::identity_op)]
+                (0..=429496728, b'0') => Some(a * 10 + 0),
+                (0..=429496728, b'1') => Some(a * 10 + 1),
+                (0..=429496728, b'2') => Some(a * 10 + 2),
+                (0..=429496728, b'3') => Some(a * 10 + 3),
+                (0..=429496728, b'4') => Some(a * 10 + 4),
+                (0..=429496728, b'5') => Some(a * 10 + 5),
+                (0..=429496728, b'6') => Some(a * 10 + 6),
+                (0..=429496728, b'7') => Some(a * 10 + 7),
+                (0..=429496728, b'8') => Some(a * 10 + 8),
+                (0..=429496728, b'9') => Some(a * 10 + 9),
+                (429496729, b'0') => Some(4294967290),
+                (429496729, b'1') => Some(4294967291),
+                (429496729, b'2') => Some(4294967292),
+                (429496729, b'3') => Some(4294967293),
+                (429496729, b'4') => Some(4294967294),
+                (429496729, b'5') => Some(4294967295),
+                _ => None,
+            }
     }
 
     // Test the special cases directly to ensure they're checked
@@ -86,6 +93,7 @@ mod test {
         assert_eq!(parse_u32_digit(429496729, b'-'), None);
     }
 
+    #[inline(always)]
     const fn d(v: u8) -> u32 {
         zero_extend_u8_u32(v - b'0')
     }
@@ -111,73 +119,59 @@ mod test {
 
     #[quickcheck]
     fn parse_u32_works_for_1_digit(d1: u8) -> bool {
-        match d1 {
-            b'0'..=b'9' => parse_u32(&[d1]) == Some(d(d1)),
-            _ => parse_u32(&[d1]).is_none(),
-        }
-    }
-
-    #[quickcheck]
-    fn parse_u32_works_for_2_digits(digits: (u8, u8)) -> bool {
-        match digits {
-            (d2 @ b'0'..=b'9', d1 @ b'0'..=b'9') => {
-                parse_u32(&[d2, d1]) == Some(d(d2) * 10 + d(d1))
+        parse_u32(&[d1])
+            == match d1 {
+                b'0'..=b'9' => Some(d(d1)),
+                _ => None,
             }
-            (d2, d1) => parse_u32(&[d2, d1]).is_none(),
-        }
     }
 
     #[quickcheck]
-    fn parse_u32_works_for_3_digits(digits: (u8, u8, u8)) -> bool {
-        match digits {
-            (d3 @ b'0'..=b'9', d2 @ b'0'..=b'9', d1 @ b'0'..=b'9') => {
-                parse_u32(&[d3, d2, d1]) == Some(d(d3) * 100 + d(d2) * 10 + d(d1))
+    fn parse_u32_works_for_2_digits(d1: u8, d2: u8) -> bool {
+        parse_u32(&[d2, d1])
+            == match (d2, d1) {
+                (b'0'..=b'9', b'0'..=b'9') => Some(d(d2) * 10 + d(d1)),
+                _ => None,
             }
-            (d3, d2, d1) => parse_u32(&[d3, d2, d1]).is_none(),
-        }
     }
 
     #[quickcheck]
-    fn parse_u32_works_for_4_digits(digits: (u8, u8, u8, u8)) -> bool {
-        match digits {
-            (d4 @ b'0'..=b'9', d3 @ b'0'..=b'9', d2 @ b'0'..=b'9', d1 @ b'0'..=b'9') => {
-                parse_u32(&[d4, d3, d2, d1])
-                    == Some(d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1))
+    fn parse_u32_works_for_3_digits(d1: u8, d2: u8, d3: u8) -> bool {
+        parse_u32(&[d3, d2, d1])
+            == match (d3, d2, d1) {
+                (b'0'..=b'9', b'0'..=b'9', b'0'..=b'9') => Some(d(d3) * 100 + d(d2) * 10 + d(d1)),
+                _ => None,
             }
-            (d4, d3, d2, d1) => parse_u32(&[d4, d3, d2, d1]).is_none(),
-        }
     }
 
     #[quickcheck]
-    fn parse_u32_works_for_5_digits(digits: (u8, u8, u8, u8, u8)) -> bool {
-        match digits {
-            (
-                d5 @ b'0'..=b'9',
-                d4 @ b'0'..=b'9',
-                d3 @ b'0'..=b'9',
-                d2 @ b'0'..=b'9',
-                d1 @ b'0'..=b'9',
-            ) => {
-                parse_u32(&[d5, d4, d3, d2, d1])
-                    == Some(d(d5) * 10000 + d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1))
+    fn parse_u32_works_for_4_digits(d1: u8, d2: u8, d3: u8, d4: u8) -> bool {
+        parse_u32(&[d4, d3, d2, d1])
+            == match (d4, d3, d2, d1) {
+                (b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9') => {
+                    Some(d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1))
+                }
+                _ => None,
             }
-            (d5, d4, d3, d2, d1) => parse_u32(&[d5, d4, d3, d2, d1]).is_none(),
-        }
     }
 
     #[quickcheck]
-    fn parse_u32_works_for_6_digits(digits: (u8, u8, u8, u8, u8, u8)) -> bool {
-        match digits {
-            (
-                d6 @ b'0'..=b'9',
-                d5 @ b'0'..=b'9',
-                d4 @ b'0'..=b'9',
-                d3 @ b'0'..=b'9',
-                d2 @ b'0'..=b'9',
-                d1 @ b'0'..=b'9',
-            ) => {
-                parse_u32(&[d6, d5, d4, d3, d2, d1])
-                    == Some(
+    fn parse_u32_works_for_5_digits(d1: u8, d2: u8, d3: u8, d4: u8, d5: u8) -> bool {
+        parse_u32(&[d5, d4, d3, d2, d1])
+            == match (d5, d4, d3, d2, d1) {
+                (b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9') => {
+                    Some(d(d5) * 10000 + d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1))
+                }
+                _ => None,
+            }
+    }
+
+    #[quickcheck]
+    fn parse_u32_works_for_6_digits(d1: u8, d2: u8, d3: u8, d4: u8, d5: u8, d6: u8) -> bool {
+        parse_u32(&[d6, d5, d4, d3, d2, d1])
+            == match (d6, d5, d4, d3, d2, d1) {
+                (b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9') => {
+                    Some(
                         d(d6) * 100000
                             + d(d5) * 10000
                             + d(d4) * 1000
@@ -185,293 +179,269 @@ mod test {
                             + d(d2) * 10
                             + d(d1),
                     )
+                }
+                _ => None,
             }
-            (d6, d5, d4, d3, d2, d1) => parse_u32(&[d6, d5, d4, d3, d2, d1]).is_none(),
-        }
     }
 
     #[quickcheck]
-    fn parse_u32_works_for_7_digits(digits: (u8, u8, u8, u8, u8, u8, u8)) -> bool {
-        match digits {
-            (
-                d7 @ b'0'..=b'9',
-                d6 @ b'0'..=b'9',
-                d5 @ b'0'..=b'9',
-                d4 @ b'0'..=b'9',
-                d3 @ b'0'..=b'9',
-                d2 @ b'0'..=b'9',
-                d1 @ b'0'..=b'9',
-            ) => {
-                parse_u32(&[d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
+    fn parse_u32_works_for_7_digits(
+        d1: u8,
+        d2: u8,
+        d3: u8,
+        d4: u8,
+        d5: u8,
+        d6: u8,
+        d7: u8,
+    ) -> bool {
+        parse_u32(&[d7, d6, d5, d4, d3, d2, d1])
+            == match (d7, d6, d5, d4, d3, d2, d1) {
+                (
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                _ => None,
             }
-            (d7, d6, d5, d4, d3, d2, d1) => parse_u32(&[d7, d6, d5, d4, d3, d2, d1]).is_none(),
-        }
     }
 
     #[quickcheck]
-    fn parse_u32_works_for_8_digits(digits: (u8, u8, u8, u8, u8, u8, u8, u8)) -> bool {
-        match digits {
-            (
-                d8 @ b'0'..=b'9',
-                d7 @ b'0'..=b'9',
-                d6 @ b'0'..=b'9',
-                d5 @ b'0'..=b'9',
-                d4 @ b'0'..=b'9',
-                d3 @ b'0'..=b'9',
-                d2 @ b'0'..=b'9',
-                d1 @ b'0'..=b'9',
-            ) => {
-                parse_u32(&[d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        d(d8) * 10000000
-                            + d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
+    fn parse_u32_works_for_8_digits(
+        (d8, d7, d6, d5, d4, d3, d2, d1): (u8, u8, u8, u8, u8, u8, u8, u8),
+    ) -> bool {
+        parse_u32(&[d8, d7, d6, d5, d4, d3, d2, d1])
+            == match (d8, d7, d6, d5, d4, d3, d2, d1) {
+                (
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    d(d8) * 10000000
+                        + d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                _ => None,
             }
-            (d8, d7, d6, d5, d4, d3, d2, d1) => {
-                parse_u32(&[d8, d7, d6, d5, d4, d3, d2, d1]).is_none()
-            }
-        }
     }
 
     #[quickcheck]
     fn parse_u32_works_for_9_digits(
-        digits1: (u8, u8, u8, u8, u8, u8, u8, u8),
-        digits2: (u8,),
+        (d8, d7, d6, d5, d4, d3, d2, d1): (u8, u8, u8, u8, u8, u8, u8, u8),
+        d9: u8,
     ) -> bool {
-        match (
-            digits1.0, digits1.1, digits1.2, digits1.3, digits1.4, digits1.5, digits1.6, digits1.7,
-            digits2.0,
-        ) {
-            (
-                d9 @ b'0'..=b'9',
-                d8 @ b'0'..=b'9',
-                d7 @ b'0'..=b'9',
-                d6 @ b'0'..=b'9',
-                d5 @ b'0'..=b'9',
-                d4 @ b'0'..=b'9',
-                d3 @ b'0'..=b'9',
-                d2 @ b'0'..=b'9',
-                d1 @ b'0'..=b'9',
-            ) => {
-                parse_u32(&[d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        d(d9) * 100000000
-                            + d(d8) * 10000000
-                            + d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
+        parse_u32(&[d9, d8, d7, d6, d5, d4, d3, d2, d1])
+            == match (d9, d8, d7, d6, d5, d4, d3, d2, d1) {
+                (
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    d(d9) * 100000000
+                        + d(d8) * 10000000
+                        + d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                _ => None,
             }
-            (d9, d8, d7, d6, d5, d4, d3, d2, d1) => {
-                parse_u32(&[d9, d8, d7, d6, d5, d4, d3, d2, d1]).is_none()
-            }
-        }
     }
 
     #[quickcheck]
     fn parse_u32_works_for_10_digits(
-        digits1: (u8, u8, u8, u8, u8, u8, u8, u8),
-        digits2: (u8, u8),
+        (d8, d7, d6, d5, d4, d3, d2, d1): (u8, u8, u8, u8, u8, u8, u8, u8),
+        d9: u8,
+        d10: u8,
     ) -> bool {
         // Note: 2^32 = 4294967296
-        let (d10, d9, d8, d7, d6, d5, d4, d3) = digits1;
-        let (d2, d1) = digits2;
-        match (d10, d9, d8, d7, d6, d5, d4, d3, d2, d1) {
-            (
-                b'0'..=b'3',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        d(d10) * 1000000000
-                            + d(d9) * 100000000
-                            + d(d8) * 10000000
-                            + d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
+        parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
+            == match (d10, d9, d8, d7, d6, d5, d4, d3, d2, d1) {
+                (
+                    b'0'..=b'3',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    d(d10) * 1000000000
+                        + d(d9) * 100000000
+                        + d(d8) * 10000000
+                        + d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                (
+                    b'4',
+                    b'0'..=b'1',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    4000000000
+                        + d(d9) * 100000000
+                        + d(d8) * 10000000
+                        + d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                (
+                    b'4',
+                    b'2',
+                    b'0'..=b'8',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    4200000000
+                        + d(d8) * 10000000
+                        + d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                (
+                    b'4',
+                    b'2',
+                    b'9',
+                    b'0'..=b'3',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    4290000000
+                        + d(d7) * 1000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                (
+                    b'4',
+                    b'2',
+                    b'9',
+                    b'4',
+                    b'0'..=b'8',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    4294000000
+                        + d(d6) * 100000
+                        + d(d5) * 10000
+                        + d(d4) * 1000
+                        + d(d3) * 100
+                        + d(d2) * 10
+                        + d(d1),
+                ),
+                (
+                    b'4',
+                    b'2',
+                    b'9',
+                    b'4',
+                    b'9',
+                    b'0'..=b'5',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(
+                    4294900000 + d(d5) * 10000 + d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1),
+                ),
+                (
+                    b'4',
+                    b'2',
+                    b'9',
+                    b'4',
+                    b'9',
+                    b'6',
+                    b'0'..=b'6',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(4294960000 + d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1)),
+                (
+                    b'4',
+                    b'2',
+                    b'9',
+                    b'4',
+                    b'9',
+                    b'6',
+                    b'7',
+                    b'0'..=b'1',
+                    b'0'..=b'9',
+                    b'0'..=b'9',
+                ) => Some(4294967000 + d(d3) * 100 + d(d2) * 10 + d(d1)),
+                (b'4', b'2', b'9', b'4', b'9', b'6', b'7', b'2', b'0'..=b'8', b'0'..=b'9') => {
+                    Some(4294967200 + d(d2) * 10 + d(d1))
+                }
+                (b'4', b'2', b'9', b'4', b'9', b'6', b'7', b'2', b'9', b'0'..=b'5') => {
+                    Some(4294967200 + d(d1))
+                }
+                _ => None,
             }
-            (
-                b'4',
-                b'0'..=b'1',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        4000000000
-                            + d(d9) * 100000000
-                            + d(d8) * 10000000
-                            + d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
-            }
-            (
-                b'4',
-                b'2',
-                b'0'..=b'8',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        4200000000
-                            + d(d8) * 10000000
-                            + d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
-            }
-            (
-                b'4',
-                b'2',
-                b'9',
-                b'0'..=b'3',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        4290000000
-                            + d(d7) * 1000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
-            }
-            (
-                b'4',
-                b'2',
-                b'9',
-                b'4',
-                b'0'..=b'8',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        4294000000
-                            + d(d6) * 100000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
-            }
-            (
-                b'4',
-                b'2',
-                b'9',
-                b'4',
-                b'9',
-                b'0'..=b'5',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(
-                        4294900000
-                            + d(d5) * 10000
-                            + d(d4) * 1000
-                            + d(d3) * 100
-                            + d(d2) * 10
-                            + d(d1),
-                    )
-            }
-            (
-                b'4',
-                b'2',
-                b'9',
-                b'4',
-                b'9',
-                b'6',
-                b'0'..=b'6',
-                b'0'..=b'9',
-                b'0'..=b'9',
-                b'0'..=b'9',
-            ) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(4294960000 + d(d4) * 1000 + d(d3) * 100 + d(d2) * 10 + d(d1))
-            }
-            (b'4', b'2', b'9', b'4', b'9', b'6', b'7', b'0'..=b'1', b'0'..=b'9', b'0'..=b'9') => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(4294967000 + d(d3) * 100 + d(d2) * 10 + d(d1))
-            }
-            (b'4', b'2', b'9', b'4', b'9', b'6', b'7', b'2', b'0'..=b'8', b'0'..=b'9') => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1])
-                    == Some(4294967200 + d(d2) * 10 + d(d1))
-            }
-            (b'4', b'2', b'9', b'4', b'9', b'6', b'7', b'2', b'9', b'0'..=b'5') => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1]) == Some(4294967200 + d(d1))
-            }
-            (d10, d9, d8, d7, d6, d5, d4, d3, d2, d1) => {
-                parse_u32(&[d10, d9, d8, d7, d6, d5, d4, d3, d2, d1]).is_none()
-            }
-        }
     }
 
     // Test the special cases directly to ensure they're checked

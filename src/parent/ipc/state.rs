@@ -1,24 +1,19 @@
 use crate::prelude::*;
 
-use super::key_watcher::KeyWatcherTarget;
-use super::types::ParentIpcMethods;
+use super::ParentIpcMethods;
+use crate::parent::key_watcher::KeyWatcherTarget;
 use std::path::PathBuf;
 
 pub struct ParentIpcDynamic {
-    child_uid: Uid,
-    child_gid: Gid,
+    child_user_group: UserGroup,
     args: Vec<String>,
     prom_environment: PromEnvironment,
     key_target: KeyWatcherTarget,
 }
 
 impl ParentIpcDynamic {
-    pub fn child_uid(&'static self) -> Uid {
-        self.child_uid
-    }
-
-    pub fn child_gid(&'static self) -> Gid {
-        self.child_gid
+    pub fn child_user_group(&'static self) -> &'static UserGroup {
+        &self.child_user_group
     }
 
     pub fn args(&'static self) -> &'static Vec<String> {
@@ -74,15 +69,13 @@ impl<M: ParentIpcMethods> ParentIpcState<M> {
     #[cold]
     pub fn init_dynamic(
         &'static self,
-        child_uid: Uid,
-        child_gid: Gid,
+        child_user_group: UserGroup,
         args: Vec<String>,
         prom_environment: PromEnvironment,
         key_dir: PathBuf,
     ) {
         let dynamic = ParentIpcDynamic {
-            child_uid,
-            child_gid,
+            child_user_group,
             args,
             prom_environment,
             key_target: KeyWatcherTarget::new(key_dir),

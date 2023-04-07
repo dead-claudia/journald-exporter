@@ -8,6 +8,7 @@ const crypto = require("crypto")
 const child_process = require("child_process")
 const http = require("http")
 const os = require("os")
+const readline = require("readline")
 
 /** @returns {never} */
 function bail(msg) {
@@ -21,18 +22,18 @@ function integerArg(arg, invalid) {
     return result
 }
 
-const args = {
-    // Use a request timeout of 5 seconds by default.
-    reqTimeout: 5,
+// Limit the test interval to 5 seconds
+const TEST_INTERVAL = 5000
 
+// Use a request timeout of 5 seconds.
+const REQUEST_TIMEOUT = 5000
+
+const args = {
     // Default the key directory to a `/tmp` directory.
     keyDir: "/tmp/integ-test.keys",
 
     // Limit the test duration to 1 minute by default, but leave it configurable for local testing.
     testDuration: 60,
-
-    // Limit the test interval to 5 seconds, but leave it configurable for testing.
-    testInterval: 5,
 
     port: 8080,
 
@@ -44,10 +45,6 @@ let argName
 for (const arg of process.argv.slice(2)) {
     if (argName) {
         switch (argName) {
-        case "-c":
-            args.reqTimeout = integerArg(arg, "Request timeout must be a number if provided")
-            break
-
         case "-k":
             if (!arg) bail("Key directory must not be empty.")
             args.keyDir = path.resolve(arg)
@@ -63,11 +60,6 @@ for (const arg of process.argv.slice(2)) {
             if (args.testDuration < 1) bail("Test duration must be a positive number of seconds")
             break
 
-        case "-i":
-            args.testInterval = integerArg(arg, "Test interval must be a number if provided")
-            if (args.testInterval < 1) bail("Test interval must be a positive number of seconds")
-            break
-
         case "-b":
             if (!arg) bail("Release binary path must not be empty.")
             args.binary = path.resolve(arg)
@@ -78,7 +70,7 @@ for (const arg of process.argv.slice(2)) {
         }
         argName = undefined
     } else {
-        if (!/^-[ckpdib]$/.test(arg)) bail(`Unknown argument \`${arg}\``)
+        if (!/^-[kpdb]$/.test(arg)) bail(`Unknown argument \`${arg}\``)
         argName = arg
     }
 }
@@ -87,8 +79,12 @@ if (argName) bail(`Expected a value for argument \`${argName}\``)
 if (process.getuid() !== 0) bail("This script must run as root")
 
 function reportAsyncError(e) {
-    if (e && e.code !== "ABORT_ERR") {
-        console.error(`[INTEG] Error thrown: ${e.stack}`)
+    if (
+        e &&
+        e.type !== "abort" &&
+        !/^ABORT_ERR$|^EPIPE$|^ECONN(?:ABORTED|REFUSED|RESET)$/.test(e.code)
+    ) {
+        console.error("[INTEG] Error thrown:", e)
         if (!process.exitCode) process.exitCode = 1
     }
 }
@@ -105,63 +101,73 @@ const ctrl = new AbortController()
 process.on("SIGTERM", () => { safeAbort(ctrl) })
 process.on("SIGINT", () => { safeAbort(ctrl) })
 
-function cleanup() {
-    fs.rm(args.keyDir, {recursive: true, force: true}, reportAsyncError)
-}
-
 // Generate a simple static key for testing.
 const testKey = crypto.randomBytes(16).toString("hex")
 
 function fetchLoop(parentSignal, terminateHandler) {
     // Give the server time to boot up. (It's normally near instant, so it shouldn't take long.)
     let byteCount = 0
-    let contentType, statusCode, timer, req
+    let timer, req, res
 
-    function cleanupFetch() {
+    function cleanupFetch(msg, e) {
+        console.error(msg)
+        reportAsyncError(e)
         clearTimeout(timer)
         parentSignal.removeEventListener("abort", onAbort)
-        if (req) req.destroy()
+        if (res) {
+            res.off("data", onData)
+            res.off("error", loopError)
+            res.off("end", reqFinished)
+        }
+        if (req) {
+            req.off("error", loopError)
+            req.off("response", onResponse)
+            req.destroy()
+        }
         terminateHandler()
     }
 
-    function onAbort() {
-        console.log("[INTEG] Request aborted")
-        cleanupFetch()
-    }
-
-    function onTimeout() {
-        console.log("[INTEG] Request timed out")
-        cleanupFetch()
-    }
-
-    function loopError(e) {
-        console.log("[INTEG] Request errored")
-        cleanupFetch()
-        if (!(req && req.destroyed) && !/^EPIPE$|^ECONN(?:ABORTED|REFUSED|RESET)$/.test(e)) {
-            reportAsyncError(e)
-        }
-    }
+    const onAbort = cleanupFetch.bind(null, "[INTEG] Request aborted")
+    const onTimeout = cleanupFetch.bind(null, "[INTEG] Request timed out")
+    const loopError = cleanupFetch.bind(null, "[INTEG] Request errored")
 
     function reqFinished() {
         if (!req) return
-        req = undefined
+        req.off("error", loopError)
+        res.off("data", onData)
+        res.off("error", loopError)
+        res.off("end", reqFinished)
+        const statusCode = res.statusCode
+        const contentType = res.headers["content-type"]
+        req = res = undefined
         clearTimeout(timer)
-        console.log(`[INTEG] Response: ${statusCode} ${http.STATUS_CODES[statusCode]} ${contentType} ${byteCount}B`)
+        console.error(`[INTEG] Response: ${statusCode} ${http.STATUS_CODES[statusCode]} ${contentType} ${byteCount}B`)
         if (!statusCode || statusCode < 200 || statusCode > 299) {
-            return loopError(new Error(`Received unsuccessful response with status ${statusCode}`))
+            loopError(new Error(`Received unsuccessful response with status ${statusCode}`))
+        } else if (!contentType || !contentType.includes("application/openmetrics-text")) {
+            loopError(new Error(`Received response with content type ${contentType}`))
+        } else if (!byteCount) {
+            loopError(new Error("Received empty response"))
+        } else {
+            byteCount = 0
+            if (!parentSignal.aborted) timer = setTimeout(loop, TEST_INTERVAL)
         }
-        if (!contentType || !contentType.includes("application/openmetrics-text")) {
-            return loopError(new Error(`Received response with content type ${contentType}`))
-        }
-        if (!byteCount) {
-            return loopError(new Error("Received empty response"))
-        }
+    }
+
+    function onData(buf) {
+        byteCount += buf.length
+    }
+
+    function onResponse(response) {
         byteCount = 0
-        if (!parentSignal.aborted) timer = setTimeout(loop, args.testInterval * 1000)
+        res = response
+        res.on("data", onData)
+        res.once("error", loopError)
+        res.once("end", reqFinished)
     }
 
     function loop() {
-        timer = setTimeout(onTimeout, args.reqTimeout * 1000)
+        timer = setTimeout(onTimeout, REQUEST_TIMEOUT)
 
         req = http.get(`http://localhost:${args.port}/metrics`, {
             headers: {
@@ -170,15 +176,7 @@ function fetchLoop(parentSignal, terminateHandler) {
         })
 
         req.once("error", loopError)
-        req.once("response", res => {
-            byteCount = 0
-            statusCode = res.statusCode
-            contentType = res.headers["content-type"]
-            res.on("data", buf => { byteCount += buf.length })
-            res.on("error", loopError)
-            res.on("end", reqFinished)
-        })
-
+        req.once("response", onResponse)
         req.end()
     }
 
@@ -186,22 +184,36 @@ function fetchLoop(parentSignal, terminateHandler) {
     loop()
 }
 
+function cleanup() {
+    console.error("[INTEG] Cleaning up")
+    fs.rm(args.keyDir, {recursive: true, force: true}, e => {
+        reportAsyncError(e)
+        console.error("[INTEG] Cleaned up")
+        setTimeout(process.exit, 1)
+    })
+}
+
 function runChildTest() {
+    console.error("[INTEG] Spawning child")
+
+    let journalctlCtrl = new AbortController()
+    let fetchCtrl = new AbortController()
+    let killCtrl = new AbortController()
+    let terminationAttempted = false
+    let fetchTimer, unitName
+
     const child = child_process.spawn(
         "systemd-run",
         [
-            "--wait", "--quiet", "--pty", "--pipe", "--collect",
+            "--wait",
+            "--collect",
             "--property=Type=notify",
             "--property=WatchdogSec=5s",
             "--property=TimeoutStartSec=5s",
             args.binary, "--port", args.port, "--key-dir", args.keyDir,
         ],
-        {stdio: "inherit"},
+        {stdio: ["ignore", "ignore", "pipe"], signal: killCtrl.signal},
     )
-
-    let fetchCtrl = new AbortController()
-    let terminationAttempted = false
-    let fetchTimer
 
     function terminateHandler() {
         if (terminationAttempted) return
@@ -209,31 +221,31 @@ function runChildTest() {
         clearTimeout(fetchTimer)
         safeAbort(fetchCtrl)
 
-        const killTimer = setTimeout(() => child.kill("SIGKILL"), 2000)
-        child.once("exit", (code, signal) => {
-            clearTimeout(killTimer)
-            console.log("[INTEG] Child exited")
-            if (code) {
-                process.exitCode = code
-            } else if (signal) {
-                process.exitCode = 128 + os.constants.signals[signal]
-            }
-            cleanup()
-        })
-        child.once("error", e => {
-            clearTimeout(killTimer)
-            console.log("[INTEG] Child errored")
-            reportAsyncError(e)
-            cleanup()
-        })
-        child.kill("SIGTERM")
-        console.log("[INTEG] Child terminate signal sent")
+        if (unitName) {
+            // Don't care about if/when it exits.
+            child_process.spawn("systemctl", ["stop", unitName], {stdio: "inherit"})
+                .on("error", reportAsyncError)
+        } else {
+            safeAbort(killCtrl)
+        }
+
+        console.error("[INTEG] Child terminate signal sent")
     }
 
     ctrl.signal.addEventListener("abort", terminateHandler, {once: true})
+    // No longer needed - cleanup will happen upon termination or error.
+    ctrl.signal.removeEventListener("abort", cleanup)
+
+    let rl = readline.createInterface({
+        input: child.stderr,
+        crlfDelay: Infinity,
+    })
+
+    rl.on("error", reportAsyncError)
+    rl.on("line", onLine)
 
     function startFetch() {
-        console.log("[INTEG] Starting fetch loop")
+        console.error("[INTEG] Starting fetch loop")
 
         fetchTimer = setTimeout(() => {
             ctrl.signal.removeEventListener("abort", terminateHandler)
@@ -243,34 +255,80 @@ function runChildTest() {
         fetchLoop(fetchCtrl.signal, terminateHandler)
     }
 
-    function onSpawn() {
-        child.off("error", onError)
-        console.log(`[INTEG] Child PID: ${child.pid}`)
-        fetchTimer = setTimeout(startFetch, 2000)
+    function onLine(line) {
+        const exec = /^\s*Running as unit:\s*(\S*\.service)\s*$/.exec(line)
+        if (exec) {
+            unitName = exec[1]
+            console.error(`[INTEG] Detected transient unit name: ${unitName}`)
+
+            // Clear out readline instance
+            rl.off("line", onLine)
+            rl.close()
+            child.stderr.resume()
+
+            // Just spawn and forget. It's just for visibility.
+            child_process.spawn(
+                "journalctl",
+                ["--unit", unitName, "--follow", "--output=cat"],
+                {stdio: "inherit", signal: journalctlCtrl.signal}
+            )
+                .on("error", reportAsyncError)
+
+            fetchTimer = setTimeout(startFetch, 2000)
+        }
     }
 
     function onError(e) {
-        child.off("spawn", onSpawn)
+        console.error("[INTEG] Child errored")
         reportAsyncError(e)
+        handleTermination()
+    }
+
+    function onExit(code, signal) {
+        console.error(`[INTEG] Child exited`)
+        if (code) {
+            process.exitCode = code
+        } else if (signal) {
+            process.exitCode = 128 + os.constants.signals[signal]
+        }
+        handleTermination()
+    }
+
+    function handleTermination() {
+        safeAbort(journalctlCtrl)
+        child.off("error", onError)
+        child.off("exit", onExit)
+        setTimeout(cleanup, 1000);
     }
 
     child.once("error", onError)
-    child.once("spawn", onSpawn)
+    child.once("exit", onExit)
 }
 
+ctrl.signal.addEventListener("abort", cleanup, {once: true})
 fs.rm(args.keyDir, {recursive: true, force: true}, err => {
-    if (err) return reportAsyncError(err)
+    if (err) {
+        reportAsyncError(err)
+        return
+    }
+
     fs.mkdir(args.keyDir, {recursive: true, mode: 0o755}, err => {
-        if (err) return reportAsyncError(err)
-        ctrl.signal.addEventListener("abort", cleanup, {once: true})
+        if (err) {
+            reportAsyncError(err)
+            return
+        }
 
         fs.writeFile(path.join(args.keyDir, "test.key"), testKey, {
             flag: "wx",
             mode: 0o600,
             signal: ctrl.signal,
         }, err => {
-            if (err) reportAsyncError(err)
-            else runChildTest()
+            if (err) {
+                reportAsyncError(err)
+                return
+            }
+
+            runChildTest()
         })
     })
 })

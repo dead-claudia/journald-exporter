@@ -1,45 +1,99 @@
 //! This module exists so sign extensions, truncations, and such are easier to spot.
 
-macro_rules! define_transforms {
-    ($($name:ident($from:ty) -> $to:ty),+ $(,)?) => {
-        $(
-            #[cfg_attr(not(test), allow(unused))]
-            pub const fn $name(value: $from) -> $to {
-                // That's the point of this function, to move conversions out to where I can be a
-                // lot more explicit.
-                #![allow(clippy::as_conversions)]
+// That's the point of this function, to move conversions out to where I can be a
+// lot more explicit.
+#![allow(clippy::as_conversions)]
+// Allow test-only transforms
+#![cfg_attr(not(test), allow(unused))]
 
-                value as $to
-            }
-        )+
-    };
+pub const fn zero_extend_u8_i32(value: u8) -> i32 {
+    value as i32
 }
 
-define_transforms! {
-    zero_extend_u8_i32(u8) -> i32,
-    zero_extend_u8_c_int(u8) -> i32,
-    zero_extend_u8_u32(u8) -> u32,
-    zero_extend_u8_usize(u8) -> usize,
-    zero_extend_u16_usize(u16) -> usize,
-    zero_extend_u32_usize(u32) -> usize,
-    zero_extend_usize_u64(usize) -> u64,
+pub const fn zero_extend_u8_c_int(value: u8) -> i32 {
+    value as i32
+}
 
-    reinterpret_i32_c_uint(i32) -> libc::c_uint,
-    reinterpret_i64_u64(i64) -> u64,
-    reinterpret_u32_i32(u32) -> i32,
-    reinterpret_i32_u32(i32) -> u32,
-    reinterpret_u128_i128(u128) -> i128,
-    reinterpret_usize_isize(usize) -> isize,
+pub const fn zero_extend_u8_u32(value: u8) -> u32 {
+    value as u32
+}
 
-    truncate_c_long_i32(libc::c_long) -> i32,
-    truncate_u16_u8(u16) -> u8,
-    truncate_i32_u8(i32) -> u8,
-    truncate_u32_u8(u32) -> u8,
-    truncate_u64_u8(u64) -> u8,
-    truncate_u128_u64(u128) -> u64,
-    truncate_u128_i32(u128) -> i32,
-    truncate_usize_c_int(usize) -> libc::c_int,
-    truncate_usize_u8(usize) -> u8,
-    truncate_usize_u16(usize) -> u16,
-    truncate_usize_u32(usize) -> u32,
+pub const fn zero_extend_u8_usize(value: u8) -> usize {
+    value as usize
+}
+
+pub const fn zero_extend_u16_usize(value: u16) -> usize {
+    value as usize
+}
+
+pub const fn zero_extend_u32_usize(value: u32) -> usize {
+    value as usize
+}
+
+pub const fn zero_extend_usize_u64(value: usize) -> u64 {
+    value as u64
+}
+
+pub const fn reinterpret_i32_c_uint(value: i32) -> libc::c_uint {
+    value as libc::c_uint
+}
+
+pub const fn reinterpret_i64_u64(value: i64) -> u64 {
+    value as u64
+}
+
+pub const fn reinterpret_u32_i32(value: u32) -> i32 {
+    value as i32
+}
+
+pub const fn reinterpret_i32_u32(value: i32) -> u32 {
+    value as u32
+}
+
+pub const fn reinterpret_usize_isize(value: usize) -> isize {
+    value as isize
+}
+
+pub const fn reinterpret_isize_usize(value: isize) -> usize {
+    value as usize
+}
+
+pub const fn truncate_c_long_i32(value: libc::c_long) -> i32 {
+    value as i32
+}
+
+pub const fn truncate_i32_u8(value: i32) -> u8 {
+    value as u8
+}
+
+pub const fn truncate_u32_u8(value: u32) -> u8 {
+    value as u8
+}
+
+pub const fn truncate_u64_u8(value: u64) -> u8 {
+    value as u8
+}
+
+pub const fn truncate_u128_u64(value: u128) -> u64 {
+    value as u64
+}
+
+pub const fn truncate_u128_i32(value: u128) -> i32 {
+    value as i32
+}
+
+pub const fn truncate_usize_c_int(value: usize) -> libc::c_int {
+    value as libc::c_int
+}
+
+pub const fn truncate_usize_u8(value: usize) -> u8 {
+    value as u8
+}
+
+pub const fn truncate_usize_u16(value: usize) -> u16 {
+    value as u16
+}
+
+pub const fn truncate_usize_u32(value: usize) -> u32 {
+    value as u32
 }

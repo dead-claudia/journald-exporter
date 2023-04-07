@@ -7,7 +7,6 @@ mod pollable_flags;
 mod sd_journal;
 mod signal;
 mod signal_action;
-mod signal_flags;
 mod signal_set;
 mod syscall_utils;
 mod uid_gid;

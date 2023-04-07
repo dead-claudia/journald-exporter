@@ -5,6 +5,8 @@ use crate::ffi::Cursor;
 use crate::ffi::Id128;
 use crate::ffi::JournalRef;
 use crate::ffi::SystemdProvider;
+#[cfg(not(miri))]
+use const_str::cstr;
 use std::ffi::CStr;
 use std::ffi::CString;
 
@@ -42,19 +44,6 @@ impl FakeJournalRef {
     }
 }
 
-#[derive(Clone)]
-pub struct FakeJournalRefAlloc {
-    inner: Arc<FakeJournalRef>,
-}
-
-impl std::ops::Deref for FakeJournalRefAlloc {
-    type Target = FakeJournalRef;
-
-    fn deref(&self) -> &Self::Target {
-        self.inner.deref()
-    }
-}
-
 impl JournalRef for &'static FakeJournalRef {
     type Provider = FakeSystemdProvider;
 
@@ -69,10 +58,11 @@ impl JournalRef for &'static FakeJournalRef {
 
     fn seek_monotonic_usec(
         &mut self,
-        boot_id: Id128,
+        boot_id: &Id128,
         start_usec: SystemdMonotonicUsec,
     ) -> io::Result<()> {
-        self.seek_monotonic_usec.call((boot_id, start_usec.0))
+        self.seek_monotonic_usec
+            .call((Id128(boot_id.0), start_usec.0))
     }
 
     fn seek_cursor(&mut self, cursor: &Cursor) -> io::Result<()> {
@@ -131,8 +121,8 @@ where
         self.watchdog_notify.call(())
     }
 
-    fn boot_id(&'static self) -> Id128 {
-        self.boot_id
+    fn boot_id(&'static self) -> &Id128 {
+        &self.boot_id
     }
 
     fn get_monotonic_time_usec(&'static self) -> SystemdMonotonicUsec {
@@ -142,16 +132,16 @@ where
 
 // Skip in Miri as it's just testing test mocks
 #[cfg(not(miri))]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
     fn fake_systemd_provider_has_correct_properties() {
         static PROVIDER1: FakeSystemdProvider = FakeSystemdProvider::new(Id128(123));
-        assert_eq!(PROVIDER1.boot_id(), Id128(123));
+        assert_eq!(PROVIDER1.boot_id(), &Id128(123));
 
         static PROVIDER2: FakeSystemdProvider = FakeSystemdProvider::new(Id128(321));
-        assert_eq!(PROVIDER2.boot_id(), Id128(321));
+        assert_eq!(PROVIDER2.boot_id(), &Id128(321));
     }
 
     #[test]
@@ -308,7 +298,7 @@ mod test {
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
-                .seek_monotonic_usec(Id128(0), SystemdMonotonicUsec(123)),
+                .seek_monotonic_usec(&Id128(0), SystemdMonotonicUsec(123)),
             Ok(()),
         );
         PROVIDER
@@ -341,7 +331,7 @@ mod test {
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
-                .seek_monotonic_usec(Id128(0), SystemdMonotonicUsec(123)),
+                .seek_monotonic_usec(&Id128(0), SystemdMonotonicUsec(123)),
             Err(Error::from_raw_os_error(libc::EACCES)),
         );
         PROVIDER
@@ -493,7 +483,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "Unexpected calls remaining for `cursor`: [Ok(Cursor { raw: \"0123456789\" })]"]
+    #[should_panic = "Unexpected calls remaining for `cursor`: [Ok(Cursor(\"0123456789\"))]"]
     fn fake_systemd_provider_extra_cursor_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
         PROVIDER.open.enqueue_ok(());
@@ -506,7 +496,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "Unexpected calls remaining for `cursor`: [Ok(Cursor { raw: \"9876543210\" })]"]
+    #[should_panic = "Unexpected calls remaining for `cursor`: [Ok(Cursor(\"9876543210\"))]"]
     fn fake_systemd_provider_expected_cursor_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
         PROVIDER.open.enqueue_ok(());
@@ -532,11 +522,11 @@ mod test {
         PROVIDER
             .journal
             .get_data
-            .enqueue_err(c_string(b"FOO_BAR\0"), libc::EBADMSG);
+            .enqueue_err(cstr!("FOO_BAR").to_owned(), libc::EBADMSG);
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
-                .get_data(c_str(b"FOO_BAR\0")),
+                .get_data(cstr!("FOO_BAR")),
             Err(Error::from_raw_os_error(libc::EBADMSG)),
         );
         PROVIDER.assert_no_calls_remaining();
@@ -551,7 +541,7 @@ mod test {
         PROVIDER
             .journal
             .get_data
-            .enqueue_err(c_string(b"FOO_BAR\0"), libc::EBADMSG);
+            .enqueue_err(cstr!("FOO_BAR").to_owned(), libc::EBADMSG);
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -564,15 +554,15 @@ mod test {
         PROVIDER
             .journal
             .get_data
-            .enqueue_err(c_string(b"FOO_BAR\0"), libc::EBADMSG);
+            .enqueue_err(cstr!("FOO_BAR").to_owned(), libc::EBADMSG);
         PROVIDER
             .journal
             .get_data
-            .enqueue_ok(c_string(b"FOO_BAR\0"), &[1, 2, 3]);
+            .enqueue_ok(cstr!("FOO_BAR").to_owned(), &[1, 2, 3]);
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
-                .get_data(c_str(b"FOO_BAR\0")),
+                .get_data(cstr!("FOO_BAR")),
             Err(Error::from_raw_os_error(libc::EBADMSG)),
         );
         PROVIDER.assert_no_calls_remaining();

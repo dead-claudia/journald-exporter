@@ -1,9 +1,6 @@
-// FIXME: test this
-
 use crate::prelude::*;
 
-use super::ipc_state::ParentIpcState;
-use super::types::*;
+use super::*;
 use crate::ffi::PidFd;
 use std::os::unix::process::CommandExt;
 use std::process::Stdio;
@@ -40,7 +37,7 @@ impl Drop for KillChildOnDrop<'_> {
 type ChildStdio = (std::process::ChildStdin, std::process::ChildStdout);
 
 struct UserGroupTableCacheEntry {
-    table: UidGidTable,
+    table: Arc<UidGidTable>,
     expiry: Instant,
     last_updated: SystemTime,
 }
@@ -67,7 +64,7 @@ impl ParentIpcMethods for NativeIpcMethods {
         Instant::now()
     }
 
-    fn get_user_group_table(&'static self) -> io::Result<UidGidTable> {
+    fn get_user_group_table(&'static self) -> io::Result<Arc<UidGidTable>> {
         // Refresh only every 10 minutes, to not spam the file system every request (or request
         // batch).
         const USER_GROUP_REFRESH_RATE: Duration = Duration::from_secs(600);
@@ -110,7 +107,7 @@ impl ParentIpcMethods for NativeIpcMethods {
         io::copy(&mut gid_file, &mut result)?;
         let gid_table = parse_etc_passwd_etc_group(&result);
 
-        let table = UidGidTable::new(uid_table, gid_table);
+        let table = Arc::new(UidGidTable::new(uid_table, gid_table));
 
         *guard = Some(UserGroupTableCacheEntry {
             table: table.clone(),
@@ -137,8 +134,8 @@ impl ParentIpcMethods for NativeIpcMethods {
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::inherit());
-        command.uid(ipc_dynamic.child_uid().into());
-        command.gid(ipc_dynamic.child_gid().into());
+        command.uid(ipc_dynamic.child_user_group().uid);
+        command.gid(ipc_dynamic.child_user_group().gid);
 
         let mut child = command.spawn()?;
         drop(command);

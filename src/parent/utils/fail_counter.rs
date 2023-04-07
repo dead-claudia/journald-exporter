@@ -34,7 +34,7 @@ impl FailCounter {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     // Makes the tests a little easier to follow
     #![allow(clippy::bool_assert_comparison)]
 

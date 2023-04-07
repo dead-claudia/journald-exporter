@@ -89,7 +89,7 @@ fn processes_single_request_metrics() {
     D.lock().read_bytes(REQUEST);
     assert_eq!(
         D.lock().take_request(),
-        DecoderRequest::new(DecoderRequestFlags::METRICS, 0)
+        DecoderRequest::new(DecoderRequest::METRICS_REQUESTED, 0)
     );
 }
 
@@ -106,7 +106,10 @@ fn processes_single_request_key() {
     D.lock().read_bytes(REQUEST);
     assert_eq!(
         D.lock().take_request(),
-        DecoderRequest::new(DecoderRequestFlags::METRICS | DecoderRequestFlags::KEY, 0)
+        DecoderRequest::new(
+            DecoderRequest::METRICS_REQUESTED | DecoderRequest::KEYS_REQUESTED,
+            0
+        )
     );
 }
 
@@ -123,6 +126,6 @@ fn processes_single_track_request() {
     D.lock().read_bytes(REQUEST);
     assert_eq!(
         D.lock().take_request(),
-        DecoderRequest::new(DecoderRequestFlags::METRICS, 1)
+        DecoderRequest::new(DecoderRequest::METRICS_REQUESTED, 1)
     );
 }

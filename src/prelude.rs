@@ -12,8 +12,7 @@ mod test_prelude {
 pub use test_prelude::*;
 
 pub use crate::common::*;
-pub use crate::ffi::Gid;
-pub use crate::ffi::Uid;
+pub use crate::ffi::normalize_errno;
 pub use crate::state::*;
 pub use std::fmt;
 pub use std::fmt::Write as _;

@@ -2,7 +2,6 @@ pub mod child;
 pub mod common;
 pub mod parent;
 
-mod child_flags;
 #[cfg(test)]
 mod child_tests;
 #[cfg(test)]

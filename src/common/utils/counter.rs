@@ -27,9 +27,3 @@ impl Counter {
         self.current.fetch_add(n, Ordering::Relaxed).wrapping_add(n)
     }
 }
-
-impl Clone for Counter {
-    fn clone(&self) -> Self {
-        Self::new(self.current())
-    }
-}

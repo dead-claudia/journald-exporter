@@ -1,10 +1,8 @@
 use crate::prelude::*;
 
-use super::fail_counter::FailCounter;
-use super::ipc_state::ParentIpcState;
-use super::types::*;
+use super::*;
 use crate::ffi::ExitResult;
-use crate::ffi::NormalizeErrno;
+use crate::parent::utils::FailCounter;
 
 pub struct ChildSpawnManager<M: ParentIpcMethods + 'static> {
     fail_counter: FailCounter,
@@ -31,19 +29,17 @@ impl<M: ParentIpcMethods> ChildSpawnManager<M> {
             match e {
                 IpcError::Parent(e) => log::error!(
                     "Parent IPC loop failed with error: {}",
-                    NormalizeErrno(&e, None)
+                    normalize_errno(e, None)
                 ),
                 IpcError::ChildWait(e) => {
-                    log::error!("Child wait failed with error: {}", NormalizeErrno(&e, None))
+                    log::error!("Child wait failed with error: {}", normalize_errno(e, None))
                 }
             }
         }
 
-        let Some(result) = status.result else {
-            return Some(Err(Error::new(
-                ErrorKind::Other,
-                "Child errored during termination.",
-            )));
+        let result = match status.result {
+            Some(result) => result,
+            _ => return Some(Err(err("Child errored during termination."))),
         };
 
         if self
@@ -69,7 +65,7 @@ impl<M: ParentIpcMethods> ChildSpawnManager<M> {
 
         log::error!(
             "Child errored during spawn: {}",
-            NormalizeErrno(&error, None)
+            normalize_errno(error, None)
         );
         None
     }
@@ -107,15 +103,13 @@ impl<M: ParentIpcMethods> ChildSpawnManager<M> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
-    use crate::parent::ipc_mocks::*;
-    use crate::parent::ipc_test_utils::*;
+    use crate::parent::ipc::mocks::*;
+    use crate::parent::ipc::test_utils::*;
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_tracks_retries_on_spawn_error() {
         static S: StaticState = StaticState::new();
         S.init_test_state();
@@ -169,8 +163,6 @@ mod test {
     }
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_allows_ready_from_start() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
@@ -186,8 +178,6 @@ mod test {
     }
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_allows_ready_from_1_spawn_error() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
@@ -212,8 +202,6 @@ mod test {
     }
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_allows_ready_from_2_spawn_errors() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
@@ -247,8 +235,6 @@ mod test {
     }
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_allows_ready_from_3_spawn_errors() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
@@ -290,8 +276,6 @@ mod test {
     }
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_allows_ready_from_4_spawn_errors() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
@@ -341,8 +325,6 @@ mod test {
     }
 
     #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
     fn manager_tracks_retries_on_5_spawn_errors_if_spaced_far_enough_apart() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();

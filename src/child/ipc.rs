@@ -7,7 +7,6 @@ use super::request::ServerState;
 use super::request::RESPONSE_OK_METRICS;
 use super::request::RESPONSE_UNAVAILABLE;
 use crate::ffi::ImmutableWrite;
-use crate::ffi::NormalizeErrno;
 use crate::ffi::Pollable;
 
 fn read_request(
@@ -98,64 +97,27 @@ impl<C: RequestContext> IPCRequester<C> {
     }
 }
 
-#[must_use]
-#[derive(PartialEq, Eq)]
-enum PushRequestResult {
-    First,
-    Subsequent,
-}
-
-/// Returns `true` if this is the first request.
-fn push_request<C: RequestContext + 'static>(
-    ctx: C,
+// Returns `true` if successfully sent.
+pub fn send_msg<C: RequestContext + 'static>(
     shared: &RequestShared<C, impl ImmutableWrite>,
-) -> PushRequestResult {
-    let pending_requests = &shared.state.ipc_requester.pending_requests;
-    let mut guard = pending_requests.lock().unwrap_or_else(|e| e.into_inner());
-    let is_first = guard.is_empty();
-    guard.push(ctx);
-    if is_first {
-        PushRequestResult::First
-    } else {
-        PushRequestResult::Subsequent
-    }
+    buf: &[u8],
+) -> bool {
+    try_send_msg(&shared.state.terminate_notify, shared.output.inner(), buf)
 }
 
 pub fn request_metrics<C: RequestContext + 'static>(
     ctx: C,
     shared: &RequestShared<C, impl ImmutableWrite>,
 ) {
-    match try_write(
-        &shared.state.terminate_notify,
-        shared.output.inner(),
-        &[ipc::child::TRACK_REQUEST],
-    ) {
-        WriteOutputRequestResult::Written => {}
-        WriteOutputRequestResult::Terminated => {
-            ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
-            return;
-        }
-        WriteOutputRequestResult::Err(e) => {
-            log::error!("{}", NormalizeErrno(&e, None));
-            ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
-            return;
-        }
-    }
+    let pending_requests = &shared.state.ipc_requester.pending_requests;
+    let mut guard = pending_requests.lock().unwrap_or_else(|e| e.into_inner());
+    let is_first = guard.is_empty();
+    guard.push(ctx);
 
-    if push_request(ctx, shared) == PushRequestResult::First {
-        match try_write(
-            &shared.state.terminate_notify,
-            shared.output.inner(),
-            &[ipc::child::REQUEST_METRICS],
-        ) {
-            WriteOutputRequestResult::Written => {}
-            WriteOutputRequestResult::Terminated => {
-                resume_queued_requests(shared.state, &RESPONSE_UNAVAILABLE, &[]);
-            }
-            WriteOutputRequestResult::Err(e) => {
-                log::error!("{}", NormalizeErrno(&e, None));
-                resume_queued_requests(shared.state, &RESPONSE_UNAVAILABLE, &[]);
-            }
-        }
+    // Don't retain the lock longer than necessary.
+    drop(guard);
+
+    if is_first && !send_msg(shared, &[ipc::child::REQUEST_METRICS]) {
+        resume_queued_requests(shared.state, &RESPONSE_UNAVAILABLE, &[]);
     }
 }

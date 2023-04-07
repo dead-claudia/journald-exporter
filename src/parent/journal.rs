@@ -1,21 +1,20 @@
 use crate::prelude::*;
 
-use super::ipc_state::ParentIpcState;
-use super::types::ParentIpcMethods;
-use crate::common::*;
+use super::ipc::ParentIpcMethods;
+use super::ipc::ParentIpcState;
 use crate::ffi::Cursor;
 use crate::ffi::JournalRef;
-use crate::ffi::NormalizeErrno;
 use crate::ffi::SystemdMonotonicUsec;
 use crate::ffi::SystemdProvider;
-use crate::parent::watchdog_counter::WatchdogCounter;
+use crate::parent::utils::WatchdogCounter;
+use const_str::cstr;
 use std::ffi::CStr;
 
-static MESSAGE: &CStr = c_str(b"MESSAGE\0");
-static PRIORITY: &CStr = c_str(b"PRIORITY\0");
-static UID: &CStr = c_str(b"_UID\0");
-static GID: &CStr = c_str(b"_GID\0");
-static SYSTEMD_UNIT: &CStr = c_str(b"_SYSTEMD_UNIT\0");
+static MESSAGE: &CStr = cstr!("MESSAGE");
+static PRIORITY: &CStr = cstr!("PRIORITY");
+static UID: &CStr = cstr!("_UID");
+static GID: &CStr = cstr!("_GID");
+static SYSTEMD_UNIT: &CStr = cstr!("_SYSTEMD_UNIT");
 
 enum ServiceErrorType {
     Invalid,
@@ -80,26 +79,56 @@ impl<M: ParentIpcMethods> MessageReaderState<M> {
             },
         }
     }
+
+    fn try_read_id(
+        &mut self,
+        j: &mut impl JournalRef,
+        field: &'static CStr,
+        unreadable_name: &mut Option<Box<[u8]>>,
+        target: &mut Option<u32>,
+    ) -> io::Result<bool> {
+        let result = self.get_data(j, field)?;
+
+        if self.state.terminate_notify().has_notified() {
+            return Ok(false);
+        }
+
+        // Omission is okay.
+        if let Some(id_bytes) = result {
+            match parse_u32(id_bytes) {
+                Some(id) => *target = Some(id),
+                None => self.report_unreadable(unreadable_name, id_bytes),
+            }
+        }
+
+        Ok(true)
+    }
+}
+
+struct Malformed {
+    service: Option<Box<[u8]>>,
+    priority: Option<Box<[u8]>>,
+    uid: Option<Box<[u8]>>,
+    gid: Option<Box<[u8]>>,
 }
 
 struct MessageReader<M: ParentIpcMethods + 'static> {
     inner: MessageReaderState<M>,
-    malformed_service: Option<Box<[u8]>>,
-    malformed_priority: Option<Box<[u8]>>,
-    malformed_uid: Option<Box<[u8]>>,
-    malformed_gid: Option<Box<[u8]>>,
+    malformed: Malformed,
     key: MessageKey,
 }
 
 impl<M: ParentIpcMethods> MessageReader<M> {
     fn new(state: &'static ParentIpcState<M>) -> Self {
         Self {
-            key: MessageKey::new(),
-            malformed_service: None,
-            malformed_priority: None,
-            malformed_uid: None,
-            malformed_gid: None,
             inner: MessageReaderState::new(state),
+            malformed: Malformed {
+                service: None,
+                priority: None,
+                uid: None,
+                gid: None,
+            },
+            key: MessageKey::new(),
         }
     }
 
@@ -125,12 +154,12 @@ impl<M: ParentIpcMethods> MessageReader<M> {
                 Err(ServiceParseError::Invalid) => {
                     self.inner.service_error_type = ServiceErrorType::Invalid;
                     self.inner
-                        .report_unreadable(&mut self.malformed_service, name);
+                        .report_unreadable(&mut self.malformed.service, name);
                 }
                 Err(ServiceParseError::TooLong) => {
                     self.inner.service_error_type = ServiceErrorType::TooLong;
                     self.inner
-                        .report_unreadable(&mut self.malformed_service, name);
+                        .report_unreadable(&mut self.malformed.service, name);
                 }
             }
         }
@@ -147,64 +176,32 @@ impl<M: ParentIpcMethods> MessageReader<M> {
 
         if let Some(value) = result {
             match Priority::from_severity_value(value) {
-                Ok(priority) => self.key.set_priority(priority),
+                Ok(priority) => self.key.priority = priority,
                 // If it somehow has an invalid label, treat it as missing. (See below for why it's
                 // set to `Debug`.)
-                Err(PriorityParseError::Empty) => self.key.set_priority(Priority::Debug),
+                Err(PriorityParseError::Empty) => self.key.priority = Priority::Debug,
                 Err(PriorityParseError::Invalid) => {
                     self.inner
-                        .report_unreadable(&mut self.malformed_priority, value);
+                        .report_unreadable(&mut self.malformed.priority, value);
                 }
             }
         } else {
             // If there's no priority label, fall back to the lowest priority, as it's probably
             // just a control message or something.
-            self.key.set_priority(Priority::Debug);
+            self.key.priority = Priority::Debug;
         }
 
         Ok(true)
     }
 
     fn try_read_uid(&mut self, j: &mut impl JournalRef) -> io::Result<bool> {
-        let result = self.inner.get_data(j, UID)?;
-
-        if self.inner.state.terminate_notify().has_notified() {
-            return Ok(false);
-        }
-
-        // Omission is okay.
-        if let Some(id_bytes) = result {
-            match parse_u32(id_bytes) {
-                Some(id) => self.key.set_uid(id.into()),
-                None => {
-                    self.inner
-                        .report_unreadable(&mut self.malformed_uid, id_bytes);
-                }
-            }
-        }
-
-        Ok(true)
+        self.inner
+            .try_read_id(j, UID, &mut self.malformed.uid, &mut self.key.table_key.uid)
     }
 
     fn try_read_gid(&mut self, j: &mut impl JournalRef) -> io::Result<bool> {
-        let result = self.inner.get_data(j, GID)?;
-
-        if self.inner.state.terminate_notify().has_notified() {
-            return Ok(false);
-        }
-
-        // Omission is okay.
-        if let Some(id_bytes) = result {
-            match parse_u32(id_bytes) {
-                Some(id) => self.key.set_gid(id.into()),
-                None => {
-                    self.inner
-                        .report_unreadable(&mut self.malformed_gid, id_bytes);
-                }
-            }
-        }
-
-        Ok(true)
+        self.inner
+            .try_read_id(j, GID, &mut self.malformed.gid, &mut self.key.table_key.gid)
     }
 
     fn try_read_msg(&mut self, j: &mut impl JournalRef) -> io::Result<()> {
@@ -240,7 +237,7 @@ impl<M: ParentIpcMethods> MessageReader<M> {
             None => "(unknown)",
         };
 
-        if let Some(field_value) = &self.malformed_service {
+        if let Some(field_value) = &self.malformed.service {
             match self.inner.service_error_type {
                 ServiceErrorType::TooLong => {
                     log::warn!(
@@ -262,21 +259,21 @@ impl<M: ParentIpcMethods> MessageReader<M> {
             }
         }
 
-        if let Some(field_value) = &self.malformed_priority {
+        if let Some(field_value) = &self.malformed.priority {
             log::warn!(
                 "Received malformed field 'PRIORITY' in message from unit '{unit}': '{}'",
                 BinaryToDisplay(field_value),
             );
         }
 
-        if let Some(field_value) = &self.malformed_uid {
+        if let Some(field_value) = &self.malformed.uid {
             log::warn!(
                 "Received malformed field '_UID' in message from unit '{unit}': '{}'",
                 BinaryToDisplay(field_value),
             );
         }
 
-        if let Some(field_value) = &self.malformed_gid {
+        if let Some(field_value) = &self.malformed.gid {
             log::warn!(
                 "Received malformed field '_GID' in message from unit '{unit}': '{}'",
                 BinaryToDisplay(field_value),
@@ -403,7 +400,7 @@ pub fn run_journal_loop<J: JournalRef>(
     let mut resume_cursor = None;
 
     loop {
-        let prev_cursor = resume_cursor.clone();
+        let prev_cursor = resume_cursor.take();
 
         if s.terminate_notify().has_notified() {
             return Ok(());
@@ -422,12 +419,9 @@ pub fn run_journal_loop<J: JournalRef>(
                     | libc::ENFILE,
                 ) => {
                     s.state().add_fault();
-                    if resume_cursor.is_some() && resume_cursor == prev_cursor {
+                    if matches!((&resume_cursor, prev_cursor), (Some(a), Some(b)) if a == &b) {
                         s.state().add_cursor_double_retry();
-                        return Err(Error::new(
-                            ErrorKind::Other,
-                            "Cursor read failed after 2 attempts.",
-                        ));
+                        return Err(err("Cursor read failed after 2 attempts."));
                     }
 
                     if s.terminate_notify().has_notified() {
@@ -436,7 +430,7 @@ pub fn run_journal_loop<J: JournalRef>(
 
                     log::warn!(
                         "Fatal journal processing error: {}",
-                        NormalizeErrno(&e, None)
+                        normalize_errno(e, None)
                     );
 
                     if s.terminate_notify().has_notified() {
@@ -454,1374 +448,5 @@ pub fn run_journal_loop<J: JournalRef>(
                 _ => return Err(e),
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::ffi::FakeJournalRef;
-    use crate::ffi::FakeSystemdProvider;
-    use crate::ffi::Id128;
-    use crate::parent::ipc_mocks::FakeIpcChildHandle;
-
-    struct TestState {
-        state: ParentIpcState<FakeIpcChildHandle>,
-        provider: FakeSystemdProvider,
-    }
-
-    struct Entry {
-        unit: Result<&'static [u8], i32>,
-        priority: Result<&'static [u8], i32>,
-        uid: Result<&'static [u8], i32>,
-        gid: Result<&'static [u8], i32>,
-        message: Result<&'static [u8], i32>,
-    }
-
-    impl TestState {
-        const fn init() -> Self {
-            Self {
-                state: ParentIpcState::new("/bin/cat", FakeIpcChildHandle::new()),
-                provider: FakeSystemdProvider::new(Id128(123)),
-            }
-        }
-
-        fn start(&'static self) -> io::Result<()> {
-            run_journal_loop::<&FakeJournalRef>(&self.state, &self.provider)
-        }
-
-        fn snapshot(&'static self) -> PromSnapshot {
-            self.state.state().snapshot()
-        }
-
-        fn push_field(&'static self, key: &'static CStr, value: Result<&'static [u8], i32>) {
-            let key = key.to_owned();
-            match value {
-                Ok(result) => self.provider.journal.get_data.enqueue_ok(key, result),
-                Err(code) => self.provider.journal.get_data.enqueue_err(key, code),
-            }
-        }
-
-        fn push_entry(&'static self, entry: Entry) {
-            static SYSTEMD_UNIT: &CStr = c_str(b"_SYSTEMD_UNIT\0");
-            static PRIORITY: &CStr = c_str(b"PRIORITY\0");
-            static UID: &CStr = c_str(b"_UID\0");
-            static GID: &CStr = c_str(b"_GID\0");
-            static MESSAGE: &CStr = c_str(b"MESSAGE\0");
-
-            self.push_field(SYSTEMD_UNIT, entry.unit);
-            self.push_field(PRIORITY, entry.priority);
-            self.push_field(UID, entry.uid);
-            self.push_field(GID, entry.gid);
-            self.push_field(MESSAGE, entry.message);
-        }
-    }
-
-    #[test]
-    fn aborts_on_initial_watchdog_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            }
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_initial_termination() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.state.terminate_notify().notify();
-
-        assert_result_eq(T.start(), Ok(()));
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_early_fatal_open_failure() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_early_fatal_set_data_threshold() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider
-            .journal
-            .set_data_threshold
-            .enqueue_err(libc::ENOMEM);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ENOMEM)));
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_early_fatal_seek() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .enqueue_err(libc::ECHILD);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ECHILD)));
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
-    fn retries_on_out_of_descriptors() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_err(libc::EMFILE);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_err(libc::ENFILE);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[
-            "Fatal journal processing error: EMFILE: Too many open files",
-            "Restarting journal loop...",
-            "Fatal journal processing error: ENFILE: Too many open files in system",
-            "Restarting journal loop...",
-        ]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 2,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
-    fn retries_on_connection_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::ECONNRESET);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::ECONNABORTED);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000), (Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[
-            "Fatal journal processing error: ECONNRESET: Connection reset by peer",
-            "Restarting journal loop...",
-            "Fatal journal processing error: ECONNABORTED: Software caused connection abort",
-            "Restarting journal loop...",
-        ]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 2,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_io_error_during_wait() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_memory_error_during_next() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_err(libc::ENOMEM);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ENOMEM)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 0,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn aborts_on_missing_cursor_after_next() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider.journal.cursor.enqueue_err(libc::ENOENT);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ENOENT)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 1,
-                fields_ingested: 0,
-                data_bytes_ingested: 0,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot::empty()
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn pushes_entry_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"some text"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 1,
-                fields_ingested: 5,
-                data_bytes_ingested: 34,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 1,
-                        bytes: 9,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b""),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 1,
-                fields_ingested: 5,
-                data_bytes_ingested: 25,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 1,
-                        bytes: 0,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn processes_unreadable_service_names_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Err(libc::ENOENT),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Err(libc::E2BIG),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Err(libc::ENOBUFS),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Err(libc::EBADMSG),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 16,
-                data_bytes_ingested: 56,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 2,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(Some(123), Some(123), None, Priority::Warning),
-                        lines: 4,
-                        bytes: 28,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn processes_unreadable_priorities_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Err(libc::ENOENT),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Err(libc::E2BIG),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Err(libc::ENOBUFS),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            uid: Ok(b"123"),
-            priority: Err(libc::EBADMSG),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 16,
-                data_bytes_ingested: 124,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 2,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Debug
-                        ),
-                        lines: 4,
-                        bytes: 28,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
-    fn processes_invalid_priority_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"wut"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[
-            "Received malformed field 'PRIORITY' in message from unit 'my-service.service': 'wut'",
-        ]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 1,
-                fields_ingested: 5,
-                data_bytes_ingested: 34,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 1,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Emergency
-                        ),
-                        lines: 1,
-                        bytes: 7,
-                    }],)
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
-    fn processes_unreadable_uids_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::ENOENT),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::E2BIG),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::ENOBUFS),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::EBADMSG),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 16,
-                data_bytes_ingested: 116,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 2,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            None,
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 4,
-                        bytes: 28,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
-    fn processes_invalid_uids_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"wut"),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::E2BIG),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::ENOBUFS),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Err(libc::EBADMSG),
-            gid: Ok(b"123"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[
-            "Received malformed field '_UID' in message from unit 'my-service.service': 'wut'",
-        ]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 17,
-                data_bytes_ingested: 119,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 3,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            None,
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 4,
-                        bytes: 28,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn processes_unreadable_gids_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::ENOENT),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::E2BIG),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::ENOBUFS),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::EBADMSG),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 16,
-                data_bytes_ingested: 116,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 2,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            None,
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 4,
-                        bytes: 28,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    // FIXME: figure out why logs aren't appearing in Miri. It passes in `cargo test`.
-    #[cfg_attr(miri, ignore)]
-    fn processes_invalid_gids_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"wut"),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::E2BIG),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::ENOBUFS),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Err(libc::EBADMSG),
-            message: Ok(b"message"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        logger_guard.expect_logs(&[
-            "Received malformed field '_GID' in message from unit 'my-service.service': 'wut'",
-        ]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 17,
-                data_bytes_ingested: 119,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 3,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            None,
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 4,
-                        bytes: 28,
-                    }])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn processes_unreadable_messages_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 1"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Err(libc::ENOENT),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 2"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Err(libc::E2BIG),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 3"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Err(libc::ENOBUFS),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor 4"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"123"),
-            message: Err(libc::EBADMSG),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 4,
-                fields_ingested: 16,
-                data_bytes_ingested: 100,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 2,
-                corrupted_fields: 1,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 4,
-                        bytes: 0,
-                    }],)
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
-    }
-
-    #[test]
-    fn pushes_multiple_entries_then_aborts_on_wait_error() {
-        let logger_guard = setup_capture_logger();
-        static T: TestState = TestState::init();
-
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.open.enqueue_ok(());
-        T.provider.journal.set_data_threshold.enqueue_ok(());
-        T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-        T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-        T.provider.journal.wait.enqueue_ok(true);
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"456"),
-            message: Ok(b"some text 1"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"4"),
-            uid: Ok(b"123"),
-            gid: Ok(b"456"),
-            message: Ok(b"some text 2"),
-        });
-        T.provider.journal.next.enqueue_ok(true);
-        T.provider
-            .journal
-            .cursor
-            .enqueue_ok(Cursor::new(b"test cursor"));
-        T.push_entry(Entry {
-            unit: Ok(b"my-service.service"),
-            priority: Ok(b"6"),
-            uid: Ok(b"456"),
-            gid: Ok(b"123"),
-            message: Ok(b"some text 3"),
-        });
-        T.provider.journal.next.enqueue_ok(false);
-        T.provider.watchdog_notify.enqueue_ok(());
-        T.provider.journal.wait.enqueue_err(libc::EIO);
-
-        assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
-        logger_guard.expect_logs(&[]);
-        T.provider
-            .journal
-            .seek_monotonic_usec
-            .assert_calls(&[(Id128(123), 122_940_000_000)]);
-        assert_eq!(
-            T.snapshot(),
-            PromSnapshot {
-                entries_ingested: 3,
-                fields_ingested: 15,
-                data_bytes_ingested: 108,
-                faults: 0,
-                cursor_double_retries: 0,
-                unreadable_fields: 0,
-                corrupted_fields: 0,
-                requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: Box::new([
-                        ByteCountSnapshotEntry {
-                            key: MessageKey::build(
-                                Some(123),
-                                Some(456),
-                                Some(b"my-service.service"),
-                                Priority::Warning
-                            ),
-                            lines: 2,
-                            bytes: 22,
-                        },
-                        ByteCountSnapshotEntry {
-                            key: MessageKey::build(
-                                Some(456),
-                                Some(123),
-                                Some(b"my-service.service"),
-                                Priority::Informational
-                            ),
-                            lines: 1,
-                            bytes: 11,
-                        },
-                    ])
-                }
-            },
-        );
-        T.provider.assert_no_calls_remaining();
     }
 }

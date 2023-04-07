@@ -16,7 +16,6 @@ pub fn unknown_version(version: u32) -> ! {
     panic!("Bad version ID: {}", version)
 }
 
-#[derive(Clone, Copy)]
 pub struct ReadPhase(u32);
 
 impl fmt::Debug for ReadPhase {
@@ -164,7 +163,7 @@ impl<'a> ReadIter<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     #![allow(clippy::bool_assert_comparison)]
 
     use super::*;

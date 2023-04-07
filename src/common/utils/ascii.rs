@@ -1,17 +1,21 @@
 use crate::prelude::*;
 
 pub fn to_hex_pair(byte: u8) -> (u8, u8) {
-    // FIXME: remove once https://github.com/rust-lang/rust-clippy/pull/10309 is released.
-    #![allow(clippy::arithmetic_side_effects)]
+    // FIXME: Switch `wrapping_*` calls to literal operators where possible once
+    // https://github.com/rust-lang/rust-clippy/pull/10309 is released.
 
     fn to_hex(quad: u8) -> u8 {
-        quad.wrapping_add(if quad < 10 { b'0' } else { b'A' - 10 })
+        quad.wrapping_add(if quad < 10 {
+            b'0'
+        } else {
+            b'A'.wrapping_sub(10)
+        })
     }
 
-    (to_hex(byte >> 4), to_hex(byte & 0x0F))
+    (to_hex(byte.wrapping_shr(4)), to_hex(byte & 0x0F))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct BinaryToDebug<'a>(pub &'a [u8]);
 
 impl fmt::Debug for BinaryToDebug<'_> {
@@ -23,7 +27,7 @@ impl fmt::Debug for BinaryToDebug<'_> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct BinaryToDisplay<'a>(pub &'a [u8]);
 
 impl fmt::Debug for BinaryToDisplay<'_> {
@@ -62,7 +66,7 @@ impl fmt::Display for BinaryToDisplay<'_> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct DebugBigSlice<'a>(pub &'a [u8]);
 
 impl fmt::Debug for DebugBigSlice<'_> {
@@ -122,7 +126,7 @@ pub fn trim_auth_token(mut data: &[u8]) -> &[u8] {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     //  #####  ####          #    # ###### #    #         #####    ##   # #####

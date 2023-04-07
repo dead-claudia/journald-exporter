@@ -1,7 +1,6 @@
 use crate::prelude::*;
 
-use super::ipc_state::ParentIpcState;
-use super::types::*;
+use super::*;
 use crate::test_utils::CallSpy;
 use crate::test_utils::ReadSpy;
 use crate::test_utils::WriteSpy;
@@ -125,8 +124,8 @@ impl ParentIpcMethods for FakeIpcChildHandle {
         self.next_instant.call(())
     }
 
-    fn get_user_group_table(&'static self) -> io::Result<UidGidTable> {
-        Ok(get_user_group_table().clone())
+    fn get_user_group_table(&'static self) -> io::Result<Arc<UidGidTable>> {
+        Ok(get_user_group_table())
     }
 
     fn child_spawn(&self, _: &'static ParentIpcState<Self>) -> io::Result<(&WriteSpy, &ReadSpy)> {
@@ -170,21 +169,22 @@ impl ParentIpcMethods for FakeIpcChildHandle {
     }
 }
 
-mod test {
+mod tests {
     use super::*;
 
+    use crate::ffi::current_gid;
+    use crate::ffi::current_uid;
     use crate::ffi::ExitCode;
     use crate::ffi::ExitResult;
-    use std::time::SystemTime;
 
     fn init_mock_ipc_dynamic(s: &'static ParentIpcState<FakeIpcChildHandle>) {
         s.init_dynamic(
-            Uid::current(),
-            Gid::current(),
-            Vec::new(),
-            PromEnvironment {
-                created: SystemTime::UNIX_EPOCH + Duration::from_millis(123456),
+            UserGroup {
+                uid: current_uid(),
+                gid: current_gid(),
             },
+            Vec::new(),
+            PromEnvironment::new(mock_system_time(123, 456)),
             std::path::PathBuf::new(),
         );
     }

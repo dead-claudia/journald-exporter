@@ -8,8 +8,6 @@ use crate::prelude::*;
 //  #       #   #  # #    # #   #  #   #     #
 //  #       #    # #  ####  #    # #   #     #
 
-// Save a little space.
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
     #[allow(dead_code)]
@@ -52,7 +50,7 @@ impl Arbitrary for Priority {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PriorityParseError {
     Empty,
     Invalid,
@@ -113,7 +111,7 @@ impl Priority {
 //  #     # #      #   #   #  #  # #    # #
 //   #####  ###### #    #   ##   #  ####  ######
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ServiceParseError {
     Empty,
     TooLong,
@@ -122,6 +120,12 @@ pub enum ServiceParseError {
 
 // Ref: https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 pub const MAX_SERVICE_LEN: usize = 256;
+
+const _: () = {
+    if MAX_SERVICE_LEN != zero_extend_u8_usize(u8::MAX) + 1 {
+        panic!("Assumption invalid: `MAX_SERVICE_LEN == u8::MAX + 1`");
+    }
+};
 
 pub struct Service<'a>(&'a [u8]);
 
@@ -139,30 +143,30 @@ impl PartialEq for Service<'_> {
 
 impl Eq for Service<'_> {}
 
-fn is_valid_name_char(ch: u8) -> bool {
-    matches!(ch,
-        b'0'..=b'9'
-        | b'A'..=b'Z'
-        | b'a'..=b'z'
-        | b':'
-        | b'-'
-        | b'_'
-        | b'.'
-        | b'\\'
-        | b'@'
-    )
-}
-
 impl<'a> Service<'a> {
-    pub fn from_slice(s: &[u8]) -> Result<Service, ServiceParseError> {
-        #[cfg(test)]
-        assert_eq!(MAX_SERVICE_LEN, zero_extend_u8_usize(u8::MAX) + 1);
+    pub const fn from_slice(s: &[u8]) -> Result<Service, ServiceParseError> {
+        if s.is_empty() {
+            Err(ServiceParseError::Empty)
+        } else if s.len() > MAX_SERVICE_LEN {
+            Err(ServiceParseError::TooLong)
+        } else {
+            let mut current = s;
 
-        match s.len() {
-            0 => Err(ServiceParseError::Empty),
-            1..=MAX_SERVICE_LEN if s.iter().copied().all(is_valid_name_char) => Ok(Service(s)),
-            1..=MAX_SERVICE_LEN => Err(ServiceParseError::Invalid),
-            _ => Err(ServiceParseError::TooLong),
+            loop {
+                match current {
+                    [] => return Ok(Service(s)),
+                    [b'0'..=b'9'
+                    | b'A'..=b'Z'
+                    | b'a'..=b'z'
+                    | b':'
+                    | b'-'
+                    | b'_'
+                    | b'.'
+                    | b'\\'
+                    | b'@', rest @ ..] => current = rest,
+                    _ => return Err(ServiceParseError::Invalid),
+                }
+            }
         }
     }
 
@@ -171,120 +175,143 @@ impl<'a> Service<'a> {
     }
 
     pub fn as_str(&self) -> &str {
-        match std::str::from_utf8(self.0) {
-            Ok(result) => result,
-            // Shouldn't ever happen.
-            Err(_) => unreachable!(),
+        std::str::from_utf8(self.0).unwrap()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(Copy))]
+pub struct ServiceRepr {
+    service_len: u16,
+    //             [u8; MAX_SERVICE_LEN]
+    service_bytes: [u8; 256],
+}
+
+impl ServiceRepr {
+    #[cfg(test)]
+    pub const fn new(s: Option<&[u8]>) -> Result<Self, ServiceParseError> {
+        let Some(s) = s else {
+            return Ok(Self::EMPTY);
+        };
+
+        if let Err(e) = Service::from_slice(s) {
+            return Err(e);
         }
+
+        let mut service_bytes = [0; MAX_SERVICE_LEN];
+        let mut i = 0;
+        while i < s.len() {
+            service_bytes[i] = s[i];
+            i = i.wrapping_add(1);
+        }
+
+        Ok(ServiceRepr {
+            service_len: truncate_usize_u16(s.len()),
+            service_bytes,
+        })
+    }
+
+    pub const EMPTY: Self = ServiceRepr {
+        service_len: 0,
+        service_bytes: [0; MAX_SERVICE_LEN],
+    };
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.service_bytes[..zero_extend_u16_usize(self.service_len)]
+    }
+
+    pub fn as_service(&self) -> Option<Service> {
+        let bytes = self.as_bytes();
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(Service(self.as_bytes()))
+        }
+    }
+
+    pub fn set_service(&mut self, service: Service) {
+        let bytes = service.as_bytes();
+        self.service_len = truncate_usize_u16(bytes.len());
+        copy_to_start(&mut self.service_bytes, bytes);
+    }
+}
+
+impl fmt::Debug for ServiceRepr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_service().fmt(f)
     }
 }
 
 #[cfg(test)]
-pub mod sd_arbitrary {
-    use crate::prelude::*;
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ArbitraryServiceChar(u8);
 
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    struct ArbitraryServiceChar(u8);
+// Note: this must remain sorted by code point.
+#[cfg(test)]
+static SERVICE_CHARS: &[u8] =
+    b"-.0123456789:@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\_abcdefghijklmnopqrstuvwxyz";
 
-    // Note: this must remain sorted by code point.
-    static SERVICE_CHARS: &[u8] =
-        b"-.0123456789:@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\_abcdefghijklmnopqrstuvwxyz";
+#[test]
+fn test_service_chars_are_sorted() {
+    let mut sorted = SERVICE_CHARS.to_vec();
+    sorted.sort();
+    assert_eq!(&*sorted, SERVICE_CHARS);
+}
 
-    #[test]
-    fn test_service_chars_are_sorted() {
-        let mut sorted = SERVICE_CHARS.to_vec();
-        sorted.sort();
-        assert_eq!(&*sorted, SERVICE_CHARS);
+#[cfg(test)]
+impl Arbitrary for ArbitraryServiceChar {
+    fn arbitrary(g: &mut Gen) -> Self {
+        Self(*g.choose(SERVICE_CHARS).unwrap())
     }
 
-    #[test]
-    fn test_service_chars_are_correct() {
-        for &ch in SERVICE_CHARS {
-            assert!(
-                super::is_valid_name_char(ch) == SERVICE_CHARS.contains(&ch),
-                "'{}'",
-                BinaryToDisplay(&[ch])
-            );
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        let max = self.0;
+        Box::new(
+            SERVICE_CHARS
+                .iter()
+                .cloned()
+                .take_while(move |c| *c < max)
+                .map(Self),
+        )
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for ServiceRepr {
+    fn arbitrary(g: &mut Gen) -> Self {
+        let service_len = zero_extend_u8_usize(<u8>::arbitrary(g)).wrapping_add(1);
+        let mut service_bytes = [0; MAX_SERVICE_LEN];
+
+        for target in service_bytes[..service_len].iter_mut() {
+            *target = <ArbitraryServiceChar>::arbitrary(g).0;
+        }
+
+        Self {
+            service_len: truncate_usize_u16(service_len),
+            service_bytes,
         }
     }
 
-    impl Arbitrary for ArbitraryServiceChar {
-        fn arbitrary(g: &mut Gen) -> Self {
-            Self(*g.choose(SERVICE_CHARS).unwrap())
-        }
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        let as_arbitrary_bytes: &[ArbitraryServiceChar] =
+                // SAFETY: `ArbitraryServiceChar` and `u8` have the same internal representation,
+                // and only valid service characters are stored within `ArbitraryService` boxes.
+                unsafe { std::mem::transmute(self.as_bytes()) };
 
-        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            let max = self.0;
-            Box::new(
-                SERVICE_CHARS
-                    .iter()
-                    .cloned()
-                    .take_while(move |c| *c < max)
-                    .map(Self),
-            )
-        }
-    }
-
-    #[derive(Clone, PartialEq, Eq)]
-    pub struct ArbitraryService(Vec<u8>);
-
-    impl ArbitraryService {
-        pub fn from_unwrapped(bytes: &[u8]) -> Self {
-            if !bytes.iter().cloned().all(super::is_valid_name_char) {
-                panic!("{bytes:?} is not a valid service name.");
+        Box::new(Vec::from(as_arbitrary_bytes).shrink().filter_map(|v| {
+            if v.is_empty() {
+                None
+            } else {
+                // SAFETY: `ArbitraryServiceChar` and `u8` have the same bit representation,
+                // and it's always safe to transmute from the former to the latter.
+                Some(Self::new(Some(unsafe { std::mem::transmute(&*v) })).unwrap())
             }
-
-            // SAFETY: `ArbitaryServiceChar` has the same layout as `u8`, and the value's checked
-            // in the above loop to be correct.
-            Self(bytes.to_vec())
-        }
-
-        pub fn unpack(self) -> Box<[u8]> {
-            self.0.into()
-        }
-
-        fn as_bytes(&self) -> &[u8] {
-            &self.0
-        }
-
-        pub fn as_service(&self) -> Service {
-            Service::from_slice(self.as_bytes()).unwrap()
-        }
-    }
-
-    impl fmt::Debug for ArbitraryService {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(
-                f,
-                "ArbitraryService({:?})",
-                String::from_utf8_lossy(self.as_bytes())
-            )
-        }
-    }
-
-    impl Arbitrary for ArbitraryService {
-        fn arbitrary(g: &mut Gen) -> Self {
-            Self(Vec::from_iter(
-                (0..=zero_extend_u8_usize(<u8>::arbitrary(g)))
-                    .map(|_| <ArbitraryServiceChar>::arbitrary(g).0),
-            ))
-        }
-
-        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            let normalized = Vec::from_iter(self.0.iter().cloned().map(ArbitraryServiceChar));
-            Box::new(normalized.shrink().filter_map(|v| {
-                if v.is_empty() {
-                    None
-                } else {
-                    Some(Self(Vec::from_iter(v.into_iter().map(|c| c.0))))
-                }
-            }))
-        }
+        }))
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     //  ######

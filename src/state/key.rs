@@ -9,7 +9,6 @@ pub const MAX_KEY_LEN: usize = 64;
 pub const MAX_KEY_SET_LEN: usize = zero_extend_u8_usize(u8::MAX);
 
 #[must_use = "Keys should not be ignored, as that could create security holes."]
-#[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Key {
     // Allocate a fixed-length pointer here to avoid potentially leaking the password length.
@@ -97,7 +96,7 @@ fn panic_invalid_length(len: usize) -> ! {
     panic!("Key length must only contain hex characters.");
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct KeySet {
     key_set: Option<zeroize::Zeroizing<Box<[Key]>>>,
 }
@@ -155,7 +154,7 @@ impl KeySet {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

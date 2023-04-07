@@ -55,7 +55,7 @@ pub fn sd_check(syscall_name: &'static str, result: libc::c_int) -> io::Result<l
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
@@ -78,7 +78,19 @@ mod test {
 
     #[test]
     #[should_panic = "invalid argument detected"]
+    fn sd_check_panics_on_missing_syscall_error() {
+        drop(sd_check("invalid argument detected", -libc::ENOSYS));
+    }
+
+    #[test]
+    #[should_panic = "invalid argument detected"]
     fn sd_check_panics_on_invalid_argument_error() {
         drop(sd_check("invalid argument detected", -libc::EINVAL));
+    }
+
+    #[test]
+    #[should_panic = "invalid argument detected"]
+    fn sd_check_panics_on_system_fault_error() {
+        drop(sd_check("invalid argument detected", -libc::EFAULT));
     }
 }

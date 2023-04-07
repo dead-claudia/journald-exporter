@@ -40,16 +40,12 @@ impl JournalRef for NativeJournalRef {
 
     fn seek_monotonic_usec(
         &mut self,
-        boot_id: Id128,
+        boot_id: &Id128,
         start_usec: SystemdMonotonicUsec,
     ) -> io::Result<()> {
         // SAFETY: FFI call doesn't modify anything directly observable by safe Rust code.
         sd_check("sd_journal_seek_monotonic_usec", unsafe {
-            sd_journal_seek_monotonic_usec(
-                self.raw.as_ptr(),
-                std::mem::transmute(boot_id),
-                start_usec.0,
-            )
+            sd_journal_seek_monotonic_usec(self.raw.as_ptr(), boot_id.as_raw(), start_usec.0)
         })?;
         Ok(())
     }
@@ -57,7 +53,7 @@ impl JournalRef for NativeJournalRef {
     fn seek_cursor(&mut self, cursor: &Cursor) -> io::Result<()> {
         // SAFETY: `self.raw` is a valid journal pointer.
         sd_check("sd_journal_seek_cursor", unsafe {
-            sd_journal_seek_cursor(self.raw.as_ptr(), cursor.as_c_str().as_ptr())
+            sd_journal_seek_cursor(self.raw.as_ptr(), cursor.as_ptr())
         })?;
         Ok(())
     }
@@ -94,11 +90,8 @@ impl JournalRef for NativeJournalRef {
             )?;
 
             match NonNull::new(cursor.assume_init().cast_mut()) {
-                None => Err(Error::new(
-                    ErrorKind::Other,
-                    "`sd_journal_get_cursor` returned an empty pointer",
-                )),
-                Some(raw) => Ok(Cursor::from_ptr(raw)),
+                None => Err(err("`sd_journal_get_cursor` returned an empty pointer")),
+                Some(raw) => Ok(Cursor::from_raw(FixedCString::from_ptr(raw))),
             }
         }
     }
@@ -159,8 +152,10 @@ impl Drop for NativeJournalRef {
     }
 }
 
-#[cfg(test)]
-mod test {
+// Skip in Miri - it's all just testing interaction through FFI, and Miri's not likely to support
+// this ever.
+#[cfg(all(test, not(miri)))]
+mod tests {
     use super::*;
 
     use crate::ffi::syscall_utils::sd_check;
@@ -211,8 +206,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn open_works() {
         let guard = setup_capture_logger();
         static PROVIDER: LazyProvider = LazyProvider::new();
@@ -225,8 +218,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn finds_logs() {
         let guard = setup_capture_logger();
         static PROVIDER: LazyProvider = LazyProvider::new();
@@ -239,8 +230,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn set_data_threshold_works() {
         let guard = setup_capture_logger();
         static PROVIDER: LazyProvider = LazyProvider::new();
@@ -253,8 +242,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn finds_new_journal_entries() {
         static PROVIDERS: PerAttemptStatic<LazyProvider, 3> = PerAttemptStatic::new([
             LazyProvider::new(),

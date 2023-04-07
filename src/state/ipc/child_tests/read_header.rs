@@ -8,7 +8,7 @@ fn empty_buffer_produces_no_messages() {
     D.lock().read_bytes(&[]);
     assert_eq!(
         D.lock().take_request(),
-        DecoderRequest::new(DecoderRequestFlags::empty(), 0)
+        DecoderRequest::new(DecoderRequest::NO_FLAGS, 0)
     );
 }
 
@@ -38,6 +38,6 @@ fn empty_buffer_post_split_version_produces_no_messages() {
     D.lock().read_bytes(&[]);
     assert_eq!(
         D.lock().take_request(),
-        DecoderRequest::new(DecoderRequestFlags::empty(), 0)
+        DecoderRequest::new(DecoderRequest::NO_FLAGS, 0)
     );
 }

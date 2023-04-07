@@ -6,9 +6,7 @@ use crate::prelude::*;
 
 use super::common::*;
 
-pub fn init_response_metrics_header(buf: &mut Vec<u8>) {
-    buf.extend_from_slice(&[0x00, 0, 0, 0, 0]);
-}
+pub const METRICS_RESPONSE_HEADER: &[u8] = &[0x00, 0, 0, 0, 0];
 
 pub fn finish_response_metrics(mut buf: Vec<u8>) -> Box<[u8]> {
     let len = buf.len().checked_sub(5).expect("buffer not initialized");
@@ -23,9 +21,8 @@ pub fn finish_response_metrics(mut buf: Vec<u8>) -> Box<[u8]> {
 pub fn receive_key_set_bytes(key_set: KeySet) -> Box<[u8]> {
     let key_set = key_set.into_insecure_view_keys();
     assert!(key_set.len() <= zero_extend_u8_usize(u8::MAX));
-    let mut buf = Vec::new();
-    buf.push(0x01);
-    buf.push(truncate_usize_u8(key_set.len()));
+    let mut buf = Vec::with_capacity(key_set.len().wrapping_mul(MAX_KEY_LEN));
+    buf.extend_from_slice(&[0x01, truncate_usize_u8(key_set.len())]);
 
     for key in key_set.iter() {
         let key_value = key.insecure_get_value();
@@ -38,7 +35,6 @@ pub fn receive_key_set_bytes(key_set: KeySet) -> Box<[u8]> {
     buf.into()
 }
 
-#[derive(Debug)]
 enum DecoderState {
     Locked,
     Version,
@@ -65,7 +61,6 @@ impl fmt::Debug for DecoderResponse {
     }
 }
 
-#[derive(Debug)]
 pub struct Decoder {
     state: DecoderState,
     read_phase: ReadPhase,

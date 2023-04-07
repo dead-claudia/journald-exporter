@@ -6,7 +6,7 @@ use std::ffi::CStr;
 
 pub trait SystemdProvider {
     fn watchdog_notify(&'static self) -> io::Result<()>;
-    fn boot_id(&'static self) -> Id128;
+    fn boot_id(&'static self) -> &'static Id128;
     fn get_monotonic_time_usec(&'static self) -> SystemdMonotonicUsec;
 }
 
@@ -19,7 +19,7 @@ where
     fn set_data_threshold(&mut self, threshold: usize) -> io::Result<()>;
     fn seek_monotonic_usec(
         &mut self,
-        boot_id: Id128,
+        boot_id: &Id128,
         start_usec: SystemdMonotonicUsec,
     ) -> io::Result<()>;
     fn seek_cursor(&mut self, cursor: &Cursor) -> io::Result<()>;

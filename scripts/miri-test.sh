@@ -15,8 +15,6 @@ while getopts ':b' opt; do
     esac
 done
 
-cargo clean
-
 if [[ -n "$DISABLE_ISOLATION" ]]; then
     export RUST_BACKTRACE=1
     export MIRIFLAGS="${MIRIFLAGS:-} -Zmiri-disable-isolation"

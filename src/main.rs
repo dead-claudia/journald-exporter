@@ -29,12 +29,8 @@
 
 // Now for all the module specifications
 
-#[macro_use]
-extern crate bitflags;
-
 mod child;
 mod cli;
-#[macro_use]
 mod common;
 mod ffi;
 mod parent;

@@ -4,7 +4,6 @@ use super::syscall_utils::syscall_check_long;
 use super::ExitResult;
 use super::Signal;
 use super::SignalAction;
-use super::SignalActionFlags;
 use super::SignalHandler;
 use super::SignalSet;
 use crate::ffi::panic_errno;
@@ -21,6 +20,8 @@ pub struct PidFd {
 
 impl PidFd {
     pub fn open_from_child(child: &std::process::Child) -> io::Result<PidFd> {
+        assert_not_miri();
+
         // SAFETY: the syscall is ensured correct by passing in a known child ID, and it returns a
         // valid PID FD to plug into `PidFd::from_raw_fd`. The underlying syscall doesn't read any
         // Rust-observable code, and it's thread-safe, so there aren't any memory ramifications.
@@ -34,6 +35,8 @@ impl PidFd {
     }
 
     pub fn terminate(&self) -> io::Result<()> {
+        assert_not_miri();
+
         let fd = self.fd.as_raw_fd();
         // SAFETY: No pointers here are actually being provided aside from an (accepted) null
         // pointer to represent no `siginfo_t` record being passed. There's no memory safety
@@ -54,6 +57,8 @@ impl PidFd {
     }
 
     pub fn wait(&self) -> io::Result<ExitResult> {
+        assert_not_miri();
+
         static SETUP_WAITID_HACK: Once = Once::new();
 
         SETUP_WAITID_HACK.call_once(|| {
@@ -95,8 +100,7 @@ impl PidFd {
                 }
             }
 
-            let action =
-                SignalAction::new::<NoopHandler>(SignalSet::empty(), SignalActionFlags::empty());
+            let action = SignalAction::new::<NoopHandler>(SignalSet::empty());
 
             if let Err(e) = action.install(Signal::SIGCHLD) {
                 panic_errno(e, "sigaction")
@@ -135,10 +139,10 @@ impl PidFd {
                 libc::CLD_KILLED | libc::CLD_DUMPED => {
                     Ok(ExitResult::Signal(Signal::from_raw(info.si_status())))
                 }
-                _ => Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Unexpected `si_code` from wait: {}", info.si_code),
-                )),
+                _ => Err(string_err(format!(
+                    "Unexpected `si_code` from wait: {}",
+                    info.si_code
+                ))),
             }
         }
     }
@@ -170,8 +174,10 @@ impl IntoRawFd for PidFd {
     }
 }
 
-#[cfg(test)]
-mod test {
+// Skip all of these in Miri due to FFI calls and the need for a child process (which Miri also
+// doesn't support and likely won't for a while).
+#[cfg(all(test, not(miri)))]
+mod tests {
     use super::*;
 
     // So I can actually read and check this external to the program.
@@ -238,8 +244,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn pidfd_open_works() {
         let mut child = TestProcess::spawn();
         let inner = child.inner();
@@ -260,8 +264,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn pidfd_open_can_kill_pidfd() {
         let mut child = TestProcess::spawn();
         let inner = child.inner();
@@ -284,8 +286,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn pidfd_passes_through_raw_fd_correctly() {
         let mut child = TestProcess::spawn();
         let pidfd = PidFd::open_from_child(child.inner()).unwrap();

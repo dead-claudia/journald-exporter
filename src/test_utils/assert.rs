@@ -28,7 +28,7 @@ fn assert_eq_fail(left: &dyn fmt::Debug, right: &dyn fmt::Debug) -> ! {
 
 // Skip these tests under Miri. They're test utilities and would just slow down Miri test runs.
 #[cfg(not(miri))]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

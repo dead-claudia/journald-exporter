@@ -5,10 +5,76 @@
 This is all written in Rust for simplicity and performance.
 
 - [Installation](#installation)
+  - [Automated(ish)](#automatedish)
+  - [Manual](#manual)
 - [Metrics emitted](#metrics-emitted)
 - [License](#license)
 
 ## Installation
+
+There's two flows: (mostly) automated and manual.
+
+### Automated(ish)
+
+This will set up the user account and service up for you, but you'll still have to manually connect it to your monitoring service.
+
+1. Run `curl https://raw.githubusercontent.com/dead-claudia/journald-exporter/main/install.sh | sudo bash -`.
+
+    It will output something like this at the end once it completes:
+
+    ```
+    Generated API key located at '/etc/journald-exporter/keys/2023-04-05T20:02:28Z.key'.
+    ```
+
+    That `2023-04-05T20:02:28Z` will be referred to as `$DATE` from here on out. If you want to continue to copy and paste the rest, consider saving it via `DATE=<date copied from value>`
+
+2. Take that above key and copy it for later. You can use the following (using `$name` from above) to set up the key for a local Prometheus instance:
+
+    ```sh
+    sudo mkdir /etc/prometheus-keys
+    sudo cp /etc/journald-exporter/keys/$DATE.key /etc/prometheus-keys/journald-exporter.key
+    sudo chgrp prometheus /etc/prometheus-keys/journald-exporter.key
+    sudo chmod 640 /etc/prometheus-keys/journald-exporter.key
+    ```
+
+    For [Grafana Agent](https://grafana.com/docs/agent/latest/), replace the `prometheus` group with `grafana-agent` in the above `chgrp` command.
+
+    ```sh
+    sudo mkdir /etc/prometheus-keys
+    sudo cp /etc/journald-exporter/keys/$DATE.key /etc/prometheus-keys/journald-exporter.key
+    sudo chgrp grafana-agent /etc/prometheus-keys/journald-exporter.key
+    sudo chmod 640 /etc/prometheus-keys/journald-exporter.key
+    ```
+
+3. **If you're scraping locally, skip this step.** If you plan to listen over the public Internet, you'll need to do a couple things to avoid leaking the API key: Set up a local TLS termination proxy to forward connections decrypted to the exporter, then update your system's firewall to allow inbound connections to the port that TLS proxy listens on.
+
+    If you plan to only scrape locally, or if you're using things like [Grafana Agent](https://grafana.com/docs/agent/latest/), you can skip this step. Be careful to *not* open the port for the exporter in the system firewall in this case.
+
+4. [Configure your Prometheus instance to scrape the service](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config) using the API key file generated from earlier as the password file. You'll want these fields set:
+
+    - URL: `http://localhost:12345` if you're querying locally, or `https://<your-host-name>:<tls-proxy-port>` if you're accessing it remotely
+        - If you set up a TLS proxy in the previous step, use the port you set that up with, not the one for the exporter.
+    - Authorization: Basic auth with user `metrics` and password set to the key generated earlier
+
+    If you're scraping locally from Prometheus or similar (like [Grafana Agent](https://grafana.com/docs/agent/latest/)), your scrape config should look something like this:
+
+    ```yaml
+    # Add this to the `scrape_configs:` section of your Prometheus config
+    - job_name: journald-exporter
+      authorization:
+        credentials_file: /etc/prometheus-keys/journald-exporter.key
+      static_configs:
+      - targets:
+        - localhost:12345
+    ```
+
+    > If you're using a different port, you'll obviously want to change `12345` to that.
+
+Once you've done all of this, metrics should start flowing within a few minutes.
+
+To update, just reinstall the binary per the first installation step and restart the service via `systemctl restart journald-exporter.service`.
+
+### Manual
 
 > This assumes a basic understanding of shell commands and shell variables.
 
@@ -31,7 +97,7 @@ This is all written in Rust for simplicity and performance.
     sudo useradd --system --user-group journald-exporter
     ```
 
-3. Place a systemd service unit file in `/usr/local/lib/systemd/system/journald-exporter.service` with the following contents:
+3. Place a systemd service unit file in `/etc/systemd/system/journald-exporter.service` with the following contents:
 
     ```ini
     [Unit]
@@ -53,13 +119,9 @@ This is all written in Rust for simplicity and performance.
     ExecStart=/usr/sbin/journald-exporter --key-dir /etc/journald-exporter/keys --port 12345
     WatchdogSec=5m
     Restart=always
-    # And a number of security settings to lock down the program as best as
-    # reasonably possible.
+    # And a number of security settings to lock down the program somewhat.
     NoNewPrivileges=true
     ProtectSystem=strict
-    # If your systemd version is 248 or later, it's recommended to uncomment these lines
-    #NoExecPaths=/
-    #ExecPaths=/usr/sbin/journald-exporter
     ProtectClock=true
     ProtectKernelTunables=true
     ProtectKernelModules=true
@@ -78,7 +140,7 @@ This is all written in Rust for simplicity and performance.
     sudo mkdir --mode=755 /etc/journald-exporter/keys
     ```
 
-5. Create an API key via `openssl rand -hex -out "$(date -uIseconds).key" 32` and copy it to `/etc/journald-exporter/keys` with an owner of root and permissions of 600 (root can read and write, nobody else can access).
+5. Create an API key (must be pure hexadecimal but may be surrounded by whitespace in the file) and copy it to `/etc/journald-exporter/keys` with an owner of root and permissions of 600 (root can read and write, nobody else can access).
 
     ```sh
     name="$(date -uIseconds).key"
@@ -92,7 +154,7 @@ This is all written in Rust for simplicity and performance.
     ```sh
     sudo mkdir /etc/prometheus-keys
     sudo cp "/etc/journald-exporter/keys/$name" /etc/prometheus-keys/journald-exporter.key
-    sudo chgrp journald-exporter /etc/prometheus-keys/journald-exporter.key
+    sudo chgrp $prometheus_user /etc/prometheus-keys/journald-exporter.key
     sudo chmod 640 /etc/prometheus-keys/journald-exporter.key
     ```
 
@@ -134,12 +196,12 @@ To update, just reinstall the binary per the first installation step and restart
 
 - Counter `journald_entries_ingested`: The total number of entries ingested.
 - Counter `journald_fields_ingested`: The total number of data fields read. Normally it's 5 fields (`_SYSTEMD_UNIT`, `PRIORITY`, `_UID`, `_GID`, and `MESSAGE`) for message entries, but may be fewer in the case of incomplete fields and such.
-- Counter `journald_data_bytes_ingested`: The total number of data field bytes ingested across all fields, including both keys and their values.
+- Counter `journald_data_ingested_bytes`: The total number of data field bytes ingested across all fields, including both keys and their values.
 - Counter `journald_faults`: The total number of faults encountered while reading the journal.
 - Counter `journald_cursor_double_retries`: Total number of faults encountered while recovering after a previous fault. Also increments if it fails on first read. Note: too many of these in a short period of time will cause entire program to crash.
 - Counter `journald_unreadable_fields`: The total number of fields unreadable for reasons other than being corrupted (usually, too large to be read).
 - Counter `journald_corrupted_fields`: The total number of corrupted entries detected while reading the journal that could still be read.
-- Counter `journald_metrics_requests`: The total number of metrics requests received.
+- Counter `journald_metrics_requests`: The total number of requests received, including requests to paths other than the standard `GET /metrics` route.
   - This can also be used to ensure the server's live and receiving requests.
   - This can also be used to ensure that anything like [Grafana Agent](https://grafana.com/docs/agent/latest/) is in fact scraping metrics at the desired frequency, and if done locally, it can isolate that very easily from network malfunctions.
 - Counter `journald_messages_ingested`: Number of message entries successfully processed.

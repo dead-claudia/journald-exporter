@@ -1,26 +1,25 @@
 use crate::prelude::*;
 
-use super::child_spawn_manager::ChildSpawnManager;
-use super::child_spawn_manager::ChildSpawnResult;
-use super::ipc::ipc_message_loop;
-use super::ipc_state::ParentIpcState;
+use super::ipc::*;
 use super::journal::run_journal_loop;
 use super::key_watcher::run_watcher;
-use super::native_ipc::NativeIpcMethods;
-use super::types::IpcError;
-use super::types::IpcExitStatus;
-use super::types::ParentIpcMethods;
 use crate::cli::args::ParentArgs;
-use crate::ffi::ExitCode;
-use crate::ffi::ExitResult;
-use crate::ffi::NativeJournalRef;
-use crate::ffi::NativeSystemdProvider;
+use crate::ffi::*;
+use const_str::cstr;
 use std::time::SystemTime;
+
+const READY_PARENT_IPC: u8 = 1 << 0;
+const READY_BACKGROUND: u8 = 1 << 1;
+
+struct WaitState {
+    flags: u8,
+    exit_result: ExitResult,
+}
+
+static NATIVE_JOURNALD_PROVIDER: OnceCell<NativeSystemdProvider> = OnceCell::new();
 
 static IPC_STATE: ParentIpcState<NativeIpcMethods> =
     ParentIpcState::new("/proc/self/exe", NativeIpcMethods::new());
-
-static NATIVE_JOURNAL_PROVIDER: OnceCell<NativeSystemdProvider> = OnceCell::new();
 
 struct NotifyGuard;
 
@@ -32,45 +31,43 @@ impl Drop for NotifyGuard {
 }
 
 pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
-    let (child_uid, child_gid) = get_child_uid_gid()?;
+    check_parent_uid_gid()?;
+    let child_user_group = get_child_uid_gid()?;
     let provider = NativeSystemdProvider::open_provider()?;
 
-    NATIVE_JOURNAL_PROVIDER.get_or_init(|| provider);
+    NATIVE_JOURNALD_PROVIDER.get_or_init(|| provider);
 
     let _notify_guard = NotifyGuard;
 
     IPC_STATE.init_dynamic(
-        child_uid,
-        child_gid,
+        child_user_group,
         vec![String::from("--child-process"), args.port.to_string()],
-        PromEnvironment {
-            created: SystemTime::now(),
-        },
+        PromEnvironment::new(SystemTime::now()),
         args.key_dir,
     );
 
     resolve_parent_return()
 }
 
-fn get_child_uid_gid() -> io::Result<(Uid, Gid)> {
-    let table = IPC_STATE.methods().get_user_group_table()?;
-
+fn check_parent_uid_gid() -> io::Result<()> {
     // Verify it's running as root and then get the UID and GID of the child.
 
-    if Uid::current() != Uid::ROOT || Gid::current() != Gid::ROOT {
-        return Err(Error::new(
-            ErrorKind::Other,
-            "This program is intended to be run as root.",
-        ));
+    if current_uid() != ROOT_UID || current_gid() != ROOT_GID {
+        return Err(err("This program is intended to be run as root."));
     }
 
-    match table.lookup_user_group(b"journald-exporter", b"journald-exporter") {
-        (Some(uid), Some(gid)) => Ok((uid, gid)),
-        _ => Err(Error::new(
-            ErrorKind::Other,
-            "Expected a `journald-exporter` user must be present.",
-        )),
-    }
+    set_euid(ROOT_UID)?;
+    set_egid(ROOT_GID)?;
+
+    Ok(())
+}
+
+fn get_child_uid_gid() -> io::Result<UserGroup> {
+    IPC_STATE
+        .methods()
+        .get_user_group_table()?
+        .lookup_user_group(b"journald-exporter", b"journald-exporter")
+        .ok_or_else(|| err("Expected a `journald-exporter` user must be present."))
 }
 
 // Here's the intent:
@@ -81,39 +78,18 @@ fn get_child_uid_gid() -> io::Result<(Uid, Gid)> {
 //   default to an exit result of 1.
 
 fn resolve_parent_return() -> io::Result<ExitResult> {
-    // FIXME: re-evaluate once https://github.com/rust-lang/rust-clippy/pull/10309 is released.
-    #![allow(clippy::arithmetic_side_effects)]
-
-    bitflags! {
-        #[derive(Clone, Copy)]
-        struct WaitFlags: u8 {
-            const PARENT_IPC  = 1 << 0;
-            const JOURNAL     = 1 << 1;
-            const KEY_UPDATER = 1 << 2;
-        }
-    }
-
-    const READY_PARENT_IPC: u8 = 1 << 0;
-    const READY_BACKGROUND: u8 = 1 << 1;
-
-    #[derive(Clone, Copy)]
-    struct WaitState {
-        flags: u8,
-        exit_result: ExitResult,
-    }
+    struct ParentIpcTaskGuard(Option<ExitResult>);
 
     static WAIT_CHECKPOINT: Checkpoint<WaitState> = Checkpoint::new(WaitState {
         flags: 0,
         exit_result: ExitResult::Code(ExitCode(1)),
     });
 
-    struct ParentIpcTaskGuard(Option<ExitResult>);
-
     impl Drop for ParentIpcTaskGuard {
         fn drop(&mut self) {
             WAIT_CHECKPOINT.notify(|state| {
                 state.flags |= READY_PARENT_IPC;
-                if let Some(exit_result) = self.0 {
+                if let Some(exit_result) = self.0.take() {
                     state.exit_result = exit_result;
                 }
             });
@@ -141,7 +117,10 @@ fn resolve_parent_return() -> io::Result<ExitResult> {
     fn journal_task() -> ThreadTask {
         Box::new(move || {
             let _task_guard = BackgroundTaskGuard;
-            run_journal_loop::<NativeJournalRef>(&IPC_STATE, NATIVE_JOURNAL_PROVIDER.get().unwrap())
+            run_journal_loop::<NativeJournalRef>(
+                &IPC_STATE,
+                NATIVE_JOURNALD_PROVIDER.get().unwrap(),
+            )
         })
     }
 
@@ -156,9 +135,9 @@ fn resolve_parent_return() -> io::Result<ExitResult> {
     let journal_handle = ThreadHandle::spawn(journal_task());
     let key_updater_handle = ThreadHandle::spawn(key_updater_task());
 
-    static READY_MSG: &std::ffi::CStr = c_str(b"READY=1\0");
+    static READY_MSG: &std::ffi::CStr = cstr!("READY=1");
 
-    NATIVE_JOURNAL_PROVIDER
+    NATIVE_JOURNALD_PROVIDER
         .get()
         .unwrap()
         .sd_notify(READY_MSG)?;

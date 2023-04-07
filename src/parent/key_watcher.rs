@@ -1,9 +1,9 @@
 use crate::prelude::*;
 
 use super::ipc::write_to_child_input;
-use super::ipc_state::ParentIpcState;
-use super::types::ParentIpcMethods;
-use crate::ffi::NormalizeErrno;
+use super::ipc::ParentIpcMethods;
+use super::ipc::ParentIpcState;
+use crate::ffi::current_uid;
 use notify::recommended_watcher;
 use notify::Watcher;
 use std::os::unix::prelude::MetadataExt;
@@ -41,7 +41,7 @@ impl KeyWatcherTarget {
                 // Log it and silently ignore it. Easier to debug and less intrusive overall, and
                 // also by side effect plugs a potential DoS hole in case arbitrary files get added
                 // to it by a non-root process.
-                Err(e) => log::error!("Key watcher error: {}", &NormalizeErrno(&e, None)),
+                Err(e) => log::error!("Key watcher error: {}", &normalize_errno(e, None)),
             }
         }
 
@@ -56,7 +56,7 @@ pub fn write_current_key_set(s: &'static ParentIpcState<impl ParentIpcMethods>) 
         // useless error logs in the tests.
         Err(_) if s.child_input().is_none() => false,
         Err(e) => {
-            log::error!("Key watcher error: {e}");
+            log::error!("Key watcher error: {}", &normalize_errno(e, None));
             // Just in case something changed in the meantime.
             s.child_input().is_none()
         }
@@ -67,7 +67,7 @@ pub fn write_current_key_set(s: &'static ParentIpcState<impl ParentIpcMethods>) 
 fn to_io_error(error: notify::Error) -> Error {
     match error.kind {
         notify::ErrorKind::Io(e) => e,
-        _ => Error::new(ErrorKind::Other, error.to_string()),
+        _ => string_err(error.to_string()),
     }
 }
 
@@ -113,46 +113,40 @@ fn insecure_message(metadata: std::fs::Metadata) -> &'static str {
 
 // Only show the immediate path in test as it's only seeing a temporary directory, but show
 // everything in release for easier debugging.
-#[cfg(test)]
 fn resolve_file_name(entry: std::fs::DirEntry) -> std::path::PathBuf {
-    entry.file_name().into()
-}
-
-#[cfg(not(test))]
-fn resolve_file_name(entry: std::fs::DirEntry) -> std::path::PathBuf {
-    entry.path()
+    if cfg!(test) {
+        entry.file_name().into()
+    } else {
+        entry.path()
+    }
 }
 
 #[cold]
 fn report_insecure(path: &std::path::Path, metadata: std::fs::Metadata) -> Error {
-    Error::new(
-        ErrorKind::Other,
-        format!("{} has insecure permissions: {}", path.display(), {
-            insecure_message(metadata)
-        }),
-    )
+    string_err(format!(
+        "{} has insecure permissions: {}",
+        path.display(),
+        insecure_message(metadata),
+    ))
 }
 
 fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
     let metadata = entry.metadata()?;
 
     if !metadata.file_type().is_file() {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("{} is not a file", resolve_file_name(entry).display()),
-        ));
+        return Err(string_err(format!(
+            "{} is not a file",
+            resolve_file_name(entry).display()
+        )));
     }
 
     // Make polymorphic based on the current user. Easier to clean up that way in test, and in prod
     // it always checks against the root user anyways.
-    if Uid::from(metadata.uid()) != Uid::current() {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!(
-                "{} is not owned by the root user",
-                resolve_file_name(entry).display()
-            ),
-        ));
+    if metadata.uid() != current_uid() {
+        return Err(string_err(format!(
+            "{} is not owned by the root user",
+            resolve_file_name(entry).display()
+        )));
     }
 
     fn perms_are_insecure(metadata: &std::fs::Metadata) -> bool {
@@ -165,19 +159,15 @@ fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
 
     let key_data = std::fs::read_to_string(entry.path())?;
     Key::from_hex(key_data.trim().as_bytes()).ok_or_else(|| {
-        Error::new(
-            ErrorKind::Other,
-            format!(
-                "{} does not contain a valid key",
-                resolve_file_name(entry).display()
-            ),
-        )
+        string_err(format!(
+            "{} does not contain a valid key",
+            resolve_file_name(entry).display()
+        ))
     })
 }
 
 fn is_update_event(event: &notify::Event) -> bool {
     use notify::event::*;
-    use notify::EventKind;
 
     matches!(
         event.kind,
@@ -296,10 +286,6 @@ pub fn run_watcher(s: &'static ParentIpcState<impl ParentIpcMethods>) -> io::Res
 
         drop(guard);
 
-        if matches!(&state, EventState::Locked) {
-            break;
-        }
-
         fn report_errors(errors: &[notify::Error]) {
             for e in errors {
                 log::error!("Key watcher error: {e}");
@@ -331,18 +317,20 @@ pub fn run_watcher(s: &'static ParentIpcState<impl ParentIpcMethods>) -> io::Res
                 break;
             }
             // Checked for earlier.
-            EventState::Locked => unreachable!(),
+            EventState::Locked => break,
         }
     }
 
     Ok(())
 }
 
-#[cfg(test)]
-mod test {
+// Skip in Miri. Until the complex filesystem interactions can be shimmed, it's worthless to even
+// try.
+#[cfg(all(test, not(miri)))]
+mod tests {
     use super::*;
 
-    use crate::parent::ipc_test_utils::*;
+    use crate::parent::ipc::test_utils::*;
     use std::fs::File;
 
     struct TestKeyState {
@@ -357,14 +345,10 @@ mod test {
         _watcher_handle: ThreadHandle,
     }
 
-    bitflags! {
-        #[derive(Clone, Copy)]
-        struct KeyFiles: u8 {
-            const TEST_KEY = 1 << 0;
-            const TEST_KEY_2 = 1 << 1;
-            const OTHER_KEY = 1 << 2;
-        }
-    }
+    const NO_FILES: u8 = 0;
+    const FILE_TEST_KEY: u8 = 1 << 0;
+    const FILE_TEST_KEY_2: u8 = 1 << 1;
+    const FILE_OTHER_KEY: u8 = 1 << 2;
 
     fn atomic_prepare(contents: &[u8]) -> tempfile::NamedTempFile {
         atomic_prepare_mode(0o600, contents)
@@ -379,23 +363,26 @@ mod test {
         file
     }
 
-    fn to_key_set(files: KeyFiles) -> Vec<u8> {
+    fn to_key_set(files: u8) -> Vec<u8> {
         let mut expected = Vec::new();
 
-        expected.push(0x01);
-        expected.push(truncate_usize_u8(files.iter().count()));
-
-        if files.contains(KeyFiles::TEST_KEY) {
-            expected.extend_from_slice(b"\x0F0123456789abcdef");
+        fn select_file(files: u8, flag: u8, contents: &[u8]) -> &[u8] {
+            if (files & flag) != 0 {
+                contents
+            } else {
+                b""
+            }
         }
 
-        if files.contains(KeyFiles::TEST_KEY_2) {
-            expected.extend_from_slice(b"\x0F76543210fedcba98");
-        }
-
-        if files.contains(KeyFiles::OTHER_KEY) {
-            expected.extend_from_slice(b"\x0Ffedcba9876543210");
-        }
+        write_slices(
+            &mut expected,
+            &[
+                &[0x01, truncate_u32_u8(files.count_ones())],
+                select_file(files, FILE_TEST_KEY, b"\x0F0123456789abcdef"),
+                select_file(files, FILE_TEST_KEY_2, b"\x0F76543210fedcba98"),
+                select_file(files, FILE_OTHER_KEY, b"\x0Ffedcba9876543210"),
+            ],
+        );
 
         expected
     }
@@ -461,7 +448,7 @@ mod test {
 
         fn run(
             &'static self,
-            files: KeyFiles,
+            files: u8,
             setup: Option<&dyn Fn(&TestRuntimeState)>,
             update: &dyn Fn(&TestRuntimeState),
         ) {
@@ -553,22 +540,18 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_non_atomic_add_one_from_empty() {
         static T: TestManipulate = TestManipulate::new();
-        T.run(KeyFiles::TEST_KEY, None, &|rt| {
+        T.run(FILE_TEST_KEY, None, &|rt| {
             rt.non_atomic_write_key("test.key", b"0123456789abcdef");
         });
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_non_atomic_add_one_from_non_empty() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::TEST_KEY | KeyFiles::OTHER_KEY,
+            FILE_TEST_KEY | FILE_OTHER_KEY,
             Some(&|rt| {
                 rt.non_atomic_write_key("test.key", b"0123456789abcdef");
             }),
@@ -579,23 +562,19 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_non_atomic_add_two_from_non_empty() {
         static T: TestManipulate = TestManipulate::new();
-        T.run(KeyFiles::TEST_KEY | KeyFiles::OTHER_KEY, None, &|rt| {
+        T.run(FILE_TEST_KEY | FILE_OTHER_KEY, None, &|rt| {
             rt.non_atomic_write_key("test.key", b"0123456789abcdef");
             rt.non_atomic_write_key("other.key", b"fedcba9876543210");
         });
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_non_atomic_update_without_other_files() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::TEST_KEY_2,
+            FILE_TEST_KEY_2,
             Some(&|rt| {
                 rt.non_atomic_write_key("test.key", b"0123456789abcdef");
             }),
@@ -606,12 +585,10 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_non_atomic_update_with_other_files() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::TEST_KEY_2 | KeyFiles::OTHER_KEY,
+            FILE_TEST_KEY_2 | FILE_OTHER_KEY,
             Some(&|rt| {
                 rt.non_atomic_write_key("test.key", b"0123456789abcdef");
                 rt.non_atomic_write_key("other.key", b"fedcba9876543210");
@@ -623,22 +600,18 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_atomic_add_one_from_empty() {
         static T: TestManipulate = TestManipulate::new();
-        T.run(KeyFiles::TEST_KEY, None, &|rt| {
+        T.run(FILE_TEST_KEY, None, &|rt| {
             rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
         });
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_atomic_add_one_from_non_empty() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::TEST_KEY | KeyFiles::OTHER_KEY,
+            FILE_TEST_KEY | FILE_OTHER_KEY,
             Some(&|rt| {
                 rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
             }),
@@ -649,23 +622,19 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_atomic_add_two_from_non_empty() {
         static T: TestManipulate = TestManipulate::new();
-        T.run(KeyFiles::TEST_KEY | KeyFiles::OTHER_KEY, None, &|rt| {
+        T.run(FILE_TEST_KEY | FILE_OTHER_KEY, None, &|rt| {
             rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
             rt.atomic_persist("other.key", atomic_prepare(b"fedcba9876543210"));
         });
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_atomic_update_without_other_files() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::TEST_KEY_2,
+            FILE_TEST_KEY_2,
             Some(&|rt| {
                 rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
             }),
@@ -676,12 +645,10 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_atomic_update_with_other_files() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::TEST_KEY_2 | KeyFiles::OTHER_KEY,
+            FILE_TEST_KEY_2 | FILE_OTHER_KEY,
             Some(&|rt| {
                 rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
                 rt.atomic_persist("other.key", atomic_prepare(b"fedcba9876543210"));
@@ -693,12 +660,10 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_remove_one_with_no_remaining_file() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::empty(),
+            NO_FILES,
             Some(&|rt| {
                 rt.non_atomic_write_key("test.key", b"0123456789abcdef");
             }),
@@ -709,12 +674,10 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_remove_one_with_remaining_file() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::OTHER_KEY,
+            FILE_OTHER_KEY,
             Some(&|rt| {
                 rt.non_atomic_write_key("test.key", b"0123456789abcdef");
                 rt.non_atomic_write_key("other.key", b"fedcba9876543210");
@@ -726,12 +689,10 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn observes_remove_two_with_no_remaining_files() {
         static T: TestManipulate = TestManipulate::new();
         T.run(
-            KeyFiles::empty(),
+            NO_FILES,
             Some(&|rt| {
                 rt.non_atomic_write_key("test.key", b"0123456789abcdef");
                 rt.non_atomic_write_key("other.key", b"fedcba9876543210");
@@ -744,16 +705,12 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn allows_mode_700() {
         static T: TestMode = TestMode::new("test.key", 0o700, &[]);
         T.run();
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_670() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -764,8 +721,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_660() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -776,8 +731,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_650() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -788,16 +741,12 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_640() {
         static T: TestMode = TestMode::new("test.key", 0o640, &["Key watcher error: test.key has insecure permissions: readable by everyone in owning group"]);
         T.run();
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_630() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -808,8 +757,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_620() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -820,8 +767,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_610() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -832,8 +777,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_607() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -844,8 +787,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_606() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -856,8 +797,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_605() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -868,8 +807,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_604() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -880,8 +817,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_603() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -892,8 +827,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_602() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -904,8 +837,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_601() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -916,8 +847,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_677() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -928,8 +857,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_676() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -940,8 +867,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_675() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -952,8 +877,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_674() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -964,8 +887,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_673() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -976,8 +897,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_672() {
         static T: TestMode = TestMode::new(
             "test.key",
@@ -988,8 +907,6 @@ mod test {
     }
 
     #[test]
-    // Skip in Miri due to FFI calls
-    #[cfg_attr(miri, ignore)]
     fn rejects_mode_671() {
         static T: TestMode = TestMode::new(
             "test.key",

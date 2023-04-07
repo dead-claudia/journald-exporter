@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use std::borrow::Cow;
 
 const fn try_format_errno(errno: libc::c_int) -> Option<&'static str> {
     // It's okay if some of them are unreachable, as errno numbers differ across architectures
@@ -297,33 +298,38 @@ pub fn errno_shrink(code: libc::c_int) -> impl Iterator<Item = libc::c_int> {
 #[cold]
 #[inline(never)]
 pub fn panic_errno(e: Error, syscall_name: &'static str) -> ! {
-    std::panic::panic_any(NormalizeErrno(&e, Some(syscall_name)).to_string())
+    std::panic::panic_any(normalize_errno(e, Some(syscall_name)).into_owned())
 }
 
-pub struct NormalizeErrno<'a>(pub &'a Error, pub Option<&'static str>);
+#[cold]
+fn format_unknown_errno(errno: libc::c_int) -> String {
+    let mut s = String::new();
+    s.push_str("Unknown errno ");
+    let mut errno = reinterpret_i32_u32(errno);
+    while errno >= 10 {
+        s.push(char::from_digit(errno % 10, 10).unwrap());
+        errno /= 10;
+    }
+    s.push(char::from_digit(errno, 10).unwrap());
+    s
+}
 
-impl fmt::Display for NormalizeErrno<'_> {
-    #[cold]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0.raw_os_error() {
-            None => self.0.fmt(f)?,
-            Some(errno) => {
-                let (prefix, maybe_errno) = match try_format_errno(errno) {
-                    Some(s) => (s, None),
-                    None => ("Unknown errno ", Some(errno)),
-                };
+pub fn normalize_errno(e: Error, syscall: Option<&'static str>) -> Cow<'static, str> {
+    let result = match e.raw_os_error() {
+        None => Cow::Owned(e.to_string()),
+        Some(errno) => match try_format_errno(errno) {
+            Some(s) => Cow::Borrowed(s),
+            None => Cow::Owned(format_unknown_errno(errno)),
+        },
+    };
 
-                f.write_str(prefix)?;
-                if let Some(errno) = maybe_errno {
-                    errno.fmt(f)?;
-                }
-            }
-        }
-
-        if let Some(syscall) = self.1 {
-            write!(f, " from syscall '{}'", syscall)?;
-        }
-
-        Ok(())
+    if let Some(syscall) = syscall {
+        let mut s = result.into_owned();
+        s.push_str(" from syscall '");
+        s.push_str(syscall);
+        s.push('\'');
+        Cow::Owned(s)
+    } else {
+        result
     }
 }

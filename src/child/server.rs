@@ -4,7 +4,6 @@ use super::request::RequestContext;
 use super::request::ResponseHead;
 use super::request::ResponseHeaderTemplate;
 use super::request::Route;
-use crate::ffi::NormalizeErrno;
 use std::net::SocketAddr;
 use tiny_http::Method;
 
@@ -85,7 +84,7 @@ impl RequestContext for TinyHttpRequestContext {
         if let Err(e) = inner.request.respond(response) {
             log::warn!(
                 "Error while returning response: {}",
-                NormalizeErrno(&e, None)
+                normalize_errno(e, None)
             );
         }
     }

@@ -174,7 +174,7 @@ impl<T> ChannelReceiver<T> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

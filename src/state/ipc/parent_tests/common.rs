@@ -5,10 +5,10 @@ pub const fn index_hex(value: usize) -> u8 {
     b"0123456789ABCDEF"[value % 16]
 }
 
-pub fn expected_data_hex(len: usize) -> Box<[u8]> {
+pub fn gen_hex(len: usize) -> Box<[u8]> {
     let mut result = vec![0; len];
-    for (i, value) in result.iter_mut().enumerate() {
-        *value = index_hex(i);
+    for (i, target) in result.iter_mut().enumerate() {
+        *target = index_hex(i);
     }
     result.into()
 }

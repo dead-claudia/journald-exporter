@@ -1,7 +1,6 @@
 use crate::prelude::*;
 
 use crate::ffi::PollFlags;
-use crate::ffi::PollResult;
 use crate::ffi::Pollable;
 
 #[must_use]
@@ -29,7 +28,7 @@ pub fn try_read<'a>(
             } else {
                 match input.poll(PollFlags::IN, Some(Duration::from_secs(1))) {
                     Ok(result) => {
-                        should_read = result.intersects(PollResult::IN | PollResult::ERR);
+                        should_read = result.has_in() || result.has_err();
                         continue 'outer;
                     }
                     Err(e) => e,
@@ -68,7 +67,7 @@ pub fn try_read2<'a>(
             } else {
                 match input.poll(PollFlags::IN, Some(Duration::from_secs(1))) {
                     Ok(result) => {
-                        should_read = result.intersects(PollResult::IN | PollResult::ERR);
+                        should_read = result.has_in() | result.has_err();
                         continue 'outer;
                     }
                     Err(e) => e,
@@ -133,5 +132,17 @@ pub fn try_write(
     match output.flush() {
         Ok(()) => WriteOutputRequestResult::Written,
         Err(e) => WriteOutputRequestResult::Err(e),
+    }
+}
+
+// Returns `true` if successfully sent.
+pub fn try_send_msg(terminate_notify: &Notify, output: impl Pollable + Write, buf: &[u8]) -> bool {
+    match try_write(terminate_notify, output, buf) {
+        WriteOutputRequestResult::Written => true,
+        WriteOutputRequestResult::Terminated => false,
+        WriteOutputRequestResult::Err(e) => {
+            log::error!("{}", normalize_errno(e, None));
+            false
+        }
     }
 }

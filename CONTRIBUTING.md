@@ -59,9 +59,26 @@ The child server is laid out as a sort-of event driven server. The request flow 
 
 ## Miri
 
-[Miri](https://github.com/rust-lang/miri) is used both locally and in CI to ensure that memory accesses in unsafe code are still reasonably safe and also to help track down concurrency issues. The latter's particularly important since this is a multi-threaded app.
+[Miri](https://github.com/rust-lang/miri) is used both locally and in CI for two reasons:
 
-There are a number of tests marked with `#[cfg_attr(miri, ignore)]` - these should always include comments on why, so it's easier to track down at a glance (and catch more systemic issues). Currently, there seems to be two main reasons Miri fails:
+1. Ensure memory accesses in unsafe code are still as safe as pragmatically possible.
+2. Help track down concurrency issues - both the child and parent are multi-threaded, so this is pretty important.
 
-1. For some reason, Miri fails to read any logs, and I suspect it's probably something sitting between Miri and the `log` crate. If you want to help me track this down, be ready to drop a lot of `eprintln`s in and around the logger spy.
-2. If it involves calls to libc, systemd, and similar, Miri intentionally doesn't support that. Just disable it for Miri via `#[cfg_attr(miri, ignore)]`, drop a `// Skip in Miri due to FFI calls` comment, and move on.
+Sometimes, Miri will fail, or it might just run extremely slow.
+
+- For single tests, just disable it with a `#[cfg_attr(miri, ignore)]` and leave a comment why.
+- If all the tests in a module are impacted, just disable the whole `tests` module.
+
+There's two main reasons you'll need to disable tests:
+
+1. Unavoidable FFI calls and filesystem calls. Miri doesn't support that in isolated mode (what this uses) and generally never will with very few exceptions.
+2. It's extremely slow. Miri isn't fast in any sense of the word, and a full run can take around 20-30 minutes to complete depending on your machine. **If you plan to disable a test for this reason, make sure a smaller test also exists so that part of the code is still covered by Miri.**
+
+There are ways to mitigate both of those:
+
+- If it's not "just" a simple FFI wrapper, you can likely shim it.
+- Instead of using libc helpers, one can just implement the algorithm in Rust. This is done for the journal cursors' equality and (internal) length operations instead of using `strcmp` and `strlen` from libc.
+- Constants and static variables can be used to hack out a *lot* of potential slowness, at only a modest increase in compile time. They are heavily limited, but strategic use of arrays can go a long way.
+- If you're doing a lot of `Vec` work and it's turned out to be really slow in Miri, consider using `Vec::with_capacity`. The resizing operation is pretty slow, and if you're doing it in a loop, you'll probably save a lot of time.
+
+Also, there's one thing to call out: logs are *not* captured in Miri. They are explicitly ignored, and help is very much appreciated in figuring out why logs, even when using the internal test-specific capture logger, aren't handled by Miri.

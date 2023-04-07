@@ -1,15 +1,8 @@
 use crate::prelude::*;
 
-use super::child_spawn_manager::ChildSpawnManager;
-use super::child_spawn_manager::ChildSpawnResult;
-use super::ipc_mocks::ChildStateNotify;
-use super::ipc_mocks::FakeIpcChildHandle;
-use super::ipc_state::ParentIpcState;
-use super::types::IpcExitStatus;
-use super::types::ParentIpcMethods;
-use crate::ffi::ExitResult;
-use crate::ffi::Signal;
-use std::time::SystemTime;
+use super::mocks::*;
+use super::*;
+use crate::ffi::*;
 
 pub enum ExpectedSpawnResult {
     #[allow(dead_code)]
@@ -80,12 +73,12 @@ impl StaticState {
 
     pub fn init_test_state_with_key_dir(&'static self, key_dir: std::path::PathBuf) {
         self.state.init_dynamic(
-            Uid::current(),
-            Gid::current(),
-            Vec::new(),
-            PromEnvironment {
-                created: SystemTime::UNIX_EPOCH + Duration::from_millis(123456),
+            UserGroup {
+                uid: current_uid(),
+                gid: current_gid(),
             },
+            Vec::new(),
+            PromEnvironment::new(mock_system_time(123, 456)),
             key_dir,
         );
     }
@@ -119,7 +112,7 @@ impl StaticState {
 
     /// Note: always enqueue an error or drop the receiver, or the mock output reader will panic.
     pub fn run_ipc_message_loop_inner(&'static self) -> io::Result<()> {
-        super::ipc::ipc_message_loop(&self.state.methods().child_output, &self.state)
+        super::ipc_message_loop(&self.state.methods().child_output, &self.state)
     }
 
     /// Note: always enqueue an error, or the mock output reader will panic.

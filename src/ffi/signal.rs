@@ -1,3 +1,4 @@
+use super::syscall_utils::syscall_check_int;
 use crate::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -23,7 +24,7 @@ impl Arbitrary for Signal {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 pub fn sigrtmax() -> Signal {
     let result = libc::SIGRTMAX();
     if result > zero_extend_u8_i32(u8::MAX) {
@@ -32,23 +33,18 @@ pub fn sigrtmax() -> Signal {
     Signal(truncate_i32_u8(result))
 }
 
-#[cfg(all(test, miri))]
-pub fn sigrtmax() -> Signal {
-    Signal(64)
-}
-
-#[cfg(not(miri))]
 pub fn sigrtmin() -> Signal {
-    let result = libc::SIGRTMIN();
-    if result > zero_extend_u8_i32(u8::MAX) {
-        panic!("Unexpectedly high min real-time signal: {}", result);
+    if cfg!(miri) {
+        // Hack: expose glibc's normal value for this, since Miri doesn't implement the underlying
+        // libc call. Ref: https://github.com/rust-lang/miri/issues/2832
+        Signal(35)
+    } else {
+        let result = libc::SIGRTMIN();
+        if result > zero_extend_u8_i32(u8::MAX) {
+            panic!("Unexpectedly high min real-time signal: {}", result);
+        }
+        Signal(truncate_i32_u8(result))
     }
-    Signal(truncate_i32_u8(result))
-}
-
-#[cfg(miri)]
-pub fn sigrtmin() -> Signal {
-    Signal(Signal::STATIC_SIGNALS.iter().map(|s| s.0).max().unwrap() + 1)
 }
 
 impl Signal {
@@ -59,6 +55,23 @@ impl Signal {
 
     pub const fn as_raw(&self) -> i32 {
         zero_extend_u8_c_int(self.0)
+    }
+
+    pub fn request_signal_when_parent_terminates(signal: Signal) {
+        if cfg!(miri) {
+            return;
+        }
+
+        // SAFETY: doesn't impact any Rust-visible memory.
+        unsafe {
+            // The only result that could happen in practice is `EINVAL`, which results in a panic.
+            // The condition for this is the signal number being invalid, and no named signal here
+            // should ever trigger that.
+            drop(syscall_check_int(
+                "prctl",
+                libc::prctl(libc::PR_SET_PDEATHSIG, signal.as_raw()),
+            ));
+        }
     }
 
     #[allow(unused)]
@@ -143,60 +156,56 @@ impl Signal {
     // pub const SIGUNUSED: Signal = Signal(truncate_i32_u8(libc::SIGUNUSED));
 
     #[cfg(test)]
-    pub const STATIC_SIGNALS: &[Signal] = &[
-        Signal::SIGHUP,
-        Signal::SIGINT,
-        Signal::SIGQUIT,
-        Signal::SIGILL,
-        Signal::SIGTRAP,
-        Signal::SIGABRT,
-        Signal::SIGIOT,
-        Signal::SIGBUS,
-        #[cfg(target_arch = "mips")]
-        Signal::SIGEMT,
-        Signal::SIGFPE,
-        Signal::SIGKILL,
-        Signal::SIGUSR1,
-        Signal::SIGSEGV,
-        Signal::SIGUSR2,
-        Signal::SIGPIPE,
-        Signal::SIGALRM,
-        Signal::SIGTERM,
-        Signal::SIGSTKFLT,
-        Signal::SIGCHLD,
-        #[cfg(target_arch = "mips")]
-        Signal::SIGCLD,
-        Signal::SIGCONT,
-        Signal::SIGSTOP,
-        Signal::SIGTSTP,
-        Signal::SIGTTIN,
-        Signal::SIGTTOU,
-        Signal::SIGURG,
-        Signal::SIGXCPU,
-        Signal::SIGXFSZ,
-        Signal::SIGVTALRM,
-        Signal::SIGPROF,
-        Signal::SIGWINCH,
-        Signal::SIGIO,
-        Signal::SIGPOLL,
-        Signal::SIGPWR,
-        // Not actually defined in the `libc` crate.
-        // Signal::SIGINFO,
-        // Signal::SIGLOST,
-        Signal::SIGSYS,
-    ];
-
-    #[cfg(test)]
     pub fn rt_signals() -> impl Iterator<Item = Signal> {
         (sigrtmin().0..=sigrtmax().0).map(Signal)
     }
 
     #[cfg(test)]
     pub fn all_signals() -> impl Iterator<Item = Signal> {
-        Signal::STATIC_SIGNALS
-            .iter()
-            .copied()
-            .chain(Signal::rt_signals())
+        static STATIC_SIGNALS: &[Signal] = &[
+            Signal::SIGHUP,
+            Signal::SIGINT,
+            Signal::SIGQUIT,
+            Signal::SIGILL,
+            Signal::SIGTRAP,
+            Signal::SIGABRT,
+            Signal::SIGIOT,
+            Signal::SIGBUS,
+            #[cfg(target_arch = "mips")]
+            Signal::SIGEMT,
+            Signal::SIGFPE,
+            Signal::SIGKILL,
+            Signal::SIGUSR1,
+            Signal::SIGSEGV,
+            Signal::SIGUSR2,
+            Signal::SIGPIPE,
+            Signal::SIGALRM,
+            Signal::SIGTERM,
+            Signal::SIGSTKFLT,
+            Signal::SIGCHLD,
+            #[cfg(target_arch = "mips")]
+            Signal::SIGCLD,
+            Signal::SIGCONT,
+            Signal::SIGSTOP,
+            Signal::SIGTSTP,
+            Signal::SIGTTIN,
+            Signal::SIGTTOU,
+            Signal::SIGURG,
+            Signal::SIGXCPU,
+            Signal::SIGXFSZ,
+            Signal::SIGVTALRM,
+            Signal::SIGPROF,
+            Signal::SIGWINCH,
+            Signal::SIGIO,
+            Signal::SIGPOLL,
+            Signal::SIGPWR,
+            // Not actually defined in the `libc` crate.
+            // Signal::SIGINFO,
+            // Signal::SIGLOST,
+            Signal::SIGSYS,
+        ];
+
+        STATIC_SIGNALS.iter().copied().chain(Signal::rt_signals())
     }
 }
 

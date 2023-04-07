@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::ipc_state::ParentIpcState;
+use super::ParentIpcState;
 use crate::ffi::ExitResult;
 use crate::ffi::Pollable;
 
@@ -10,7 +10,7 @@ pub trait ParentIpcMethods: Send + Sync + Sized {
 
     fn next_instant(&'static self) -> Instant;
 
-    fn get_user_group_table(&'static self) -> io::Result<UidGidTable>;
+    fn get_user_group_table(&'static self) -> io::Result<Arc<UidGidTable>>;
 
     fn child_spawn(
         &'static self,
@@ -103,30 +103,25 @@ impl Arbitrary for IpcExitStatus {
     }
 }
 
-#[cfg(test)]
-mod test {
+// Skip all these tests in Miri. They take a while and are just testing test utilities.
+#[cfg(all(test, not(miri)))]
+mod tests {
     use super::*;
 
     use crate::ffi::ExitCode;
     use crate::ffi::Signal;
 
     #[quickcheck]
-    // Just testing test utilities
-    #[cfg_attr(miri, ignore)]
     fn ipc_exit_status_equality_is_reflexive(a: IpcExitStatus) -> bool {
         a == a
     }
 
     #[quickcheck]
-    // Just testing test utilities
-    #[cfg_attr(miri, ignore)]
     fn ipc_exit_status_equality_is_symmetric(a: IpcExitStatus, b: IpcExitStatus) -> bool {
         (a == b) == (b == a)
     }
 
     #[quickcheck]
-    // Just testing test utilities
-    #[cfg_attr(miri, ignore)]
     fn ipc_exit_status_equality_is_transitive(
         a: IpcExitStatus,
         b: IpcExitStatus,
@@ -140,8 +135,6 @@ mod test {
     }
 
     #[test]
-    // Just testing test utilities
-    #[cfg_attr(miri, ignore)]
     fn ipc_exit_status_assertion_works_on_pass() {
         assert_eq!(
             IpcExitStatus {
@@ -156,8 +149,6 @@ mod test {
     }
 
     #[test]
-    // Just testing test utilities
-    #[cfg_attr(miri, ignore)]
     fn ipc_exit_status_assertion_works_on_fail() {
         assert_ne!(
             IpcExitStatus {

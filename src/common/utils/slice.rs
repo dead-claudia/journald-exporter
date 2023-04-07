@@ -32,3 +32,18 @@ fn len_mismatch_fail(target_len: usize, source_len: usize) -> ! {
         source_len, target_len,
     );
 }
+
+// Optimize for code size by merging everything into here. Also makes for some simpler code.
+pub fn write_slices(result: &mut Vec<u8>, slices: &[&[u8]]) {
+    let mut len = 0_usize;
+
+    for slice in slices {
+        len = len.wrapping_add(slice.len());
+    }
+
+    result.reserve(len);
+
+    for slice in slices {
+        result.extend_from_slice(slice)
+    }
+}

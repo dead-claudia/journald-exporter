@@ -16,43 +16,22 @@ Precedence for ordering, where `a < b` implies `a` comes before `b`:
 */
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(super) struct ByteCountTableKey {
-    pub service_len: u16,
-    pub uid: Option<Uid>,
-    pub gid: Option<Gid>,
-    //             [u8; MAX_SERVICE_LEN]
-    pub service_bytes: [u8; 256],
-}
-
-#[cfg(test)]
-fn build_byte_count_key(
-    uid: Option<u32>,
-    gid: Option<u32>,
-    service: Option<&[u8]>,
-) -> ByteCountTableKey {
-    let mut service_bytes = [0; MAX_SERVICE_LEN];
-    let mut service_len = 0;
-    if let Some(s) = service {
-        service_len = truncate_usize_u16(s.len());
-        copy_to_start(&mut service_bytes, s);
-    }
-    ByteCountTableKey {
-        uid: uid.map(Uid::from),
-        gid: gid.map(Gid::from),
-        service_len,
-        service_bytes,
-    }
+#[cfg_attr(test, derive(Copy))]
+pub struct ByteCountTableKey {
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub service_repr: ServiceRepr,
 }
 
 #[cfg(test)]
 fn build_byte_count_key_tuple(
-    (uid, gid, service): (
-        Option<u32>,
-        Option<u32>,
-        Option<sd_arbitrary::ArbitraryService>,
-    ),
+    (uid, gid, service_repr): (Option<u32>, Option<u32>, ServiceRepr),
 ) -> ByteCountTableKey {
-    build_byte_count_key(uid, gid, service.map(|s| s.unpack()).as_deref())
+    ByteCountTableKey {
+        uid,
+        gid,
+        service_repr,
+    }
 }
 
 #[cfg(test)]
@@ -62,36 +41,27 @@ impl Arbitrary for ByteCountTableKey {
     }
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let service = {
-            if self.service_len > 0 {
-                Some(sd_arbitrary::ArbitraryService::from_unwrapped(
-                    &self.service_bytes,
-                ))
-            } else {
-                None
-            }
-        };
-
         Box::new(
-            (self.uid.map(u32::from), self.gid.map(u32::from), service)
+            (self.uid, self.gid, self.service_repr)
                 .shrink()
                 .map(build_byte_count_key_tuple),
         )
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(Clone, Copy))]
 pub struct MessageKey {
-    priority: Priority,
-    key: ByteCountTableKey,
+    pub priority: Priority,
+    pub table_key: ByteCountTableKey,
 }
 
 impl fmt::Debug for MessageKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MessageKey")
-            .field("uid", &self.uid())
-            .field("gid", &self.gid())
-            .field("priority", &self.priority())
+            .field("uid", &self.table_key.uid)
+            .field("gid", &self.table_key.gid)
+            .field("priority", &self.priority)
             .field("service", &self.service())
             .finish()
     }
@@ -102,15 +72,18 @@ impl Arbitrary for MessageKey {
     fn arbitrary(g: &mut Gen) -> Self {
         Self {
             priority: Arbitrary::arbitrary(g),
-            key: Arbitrary::arbitrary(g),
+            table_key: Arbitrary::arbitrary(g),
         }
     }
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         Box::new(
-            (self.priority, self.key.clone())
+            (self.priority, self.table_key)
                 .shrink()
-                .map(|(priority, key)| Self { priority, key }),
+                .map(|(priority, key)| Self {
+                    priority,
+                    table_key: key,
+                }),
         )
     }
 }
@@ -119,17 +92,26 @@ impl MessageKey {
     pub fn new() -> Self {
         Self {
             priority: Priority::Emergency,
-            key: ByteCountTableKey {
-                service_len: 0,
+            table_key: ByteCountTableKey {
                 uid: None,
                 gid: None,
-                service_bytes: [0; MAX_SERVICE_LEN],
+                service_repr: ServiceRepr::EMPTY,
             },
         }
     }
 
+    pub fn copy_from_table_entry(priority: Priority, key: &ByteCountTableKey) -> Self {
+        // It's not copyable in production, as it's supposed to be minimally copied in general
+        // (in no small part due to its size).
+        #![allow(clippy::clone_on_copy)]
+        Self {
+            priority,
+            table_key: key.clone(),
+        }
+    }
+
     #[cfg(test)]
-    pub fn build(
+    pub const fn build(
         uid: Option<u32>,
         gid: Option<u32>,
         service: Option<&[u8]>,
@@ -137,70 +119,31 @@ impl MessageKey {
     ) -> Self {
         Self {
             priority,
-            key: build_byte_count_key(uid, gid, service),
+            table_key: ByteCountTableKey {
+                uid,
+                gid,
+                service_repr: match ServiceRepr::new(service) {
+                    Ok(service_repr) => service_repr,
+                    Err(ServiceParseError::Empty) => panic!("Service name is empty."),
+                    Err(ServiceParseError::TooLong) => panic!("Service name is too long."),
+                    Err(ServiceParseError::Invalid) => panic!("Service name is invalid."),
+                },
+            },
         }
-    }
-
-    pub(super) fn from_table_key(priority: Priority, key: &ByteCountTableKey) -> Self {
-        Self {
-            priority,
-            key: key.clone(),
-        }
-    }
-
-    pub fn set_uid(&mut self, uid: Uid) {
-        self.key.uid = Some(uid);
-    }
-
-    pub fn set_gid(&mut self, gid: Gid) {
-        self.key.gid = Some(gid);
-    }
-
-    pub fn set_priority(&mut self, priority: Priority) {
-        self.priority = priority;
     }
 
     pub fn set_service(&mut self, service: Service) {
-        let bytes = service.as_bytes();
-        self.key.service_len = truncate_usize_u16(bytes.len());
-        copy_to_start(&mut self.key.service_bytes, bytes);
-    }
-
-    pub fn uid(&self) -> Option<Uid> {
-        self.key.uid
-    }
-
-    pub fn gid(&self) -> Option<Gid> {
-        self.key.gid
-    }
-
-    pub fn priority(&self) -> Priority {
-        self.priority
+        self.table_key.service_repr.set_service(service);
     }
 
     pub fn service(&self) -> Option<Service> {
-        if self.key.service_len > 0 {
-            match Service::from_slice(
-                &self.key.service_bytes[..zero_extend_u16_usize(self.key.service_len)],
-            ) {
-                Ok(result) => Some(result),
-                Err(_) => unreachable!(),
-            }
-        } else {
-            None
-        }
-    }
-
-    pub(super) fn as_table_key(&self) -> &ByteCountTableKey {
-        &self.key
+        self.table_key.service_repr.as_service()
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-
-    use sd_arbitrary::ArbitraryService;
 
     // Test utilities
 
@@ -260,19 +203,19 @@ mod test {
     #[test]
     fn has_correct_initial_uid() {
         let key = MessageKey::new();
-        assert_eq!(key.uid(), None);
+        assert_eq!(key.table_key.uid, None);
     }
 
     #[test]
     fn has_correct_initial_gid() {
         let key = MessageKey::new();
-        assert_eq!(key.gid(), None);
+        assert_eq!(key.table_key.gid, None);
     }
 
     #[test]
     fn has_correct_initial_priority() {
         let key = MessageKey::new();
-        assert_eq!(key.priority(), Priority::Emergency);
+        assert_eq!(key.priority, Priority::Emergency);
     }
 
     #[test]
@@ -282,52 +225,10 @@ mod test {
     }
 
     #[test]
-    fn returns_correct_non_zero_uid_on_set() {
-        let mut key = MessageKey::new();
-        key.set_uid(Uid::from(123));
-        assert_eq!(key.uid(), Some(Uid::from(123)));
-    }
-
-    #[test]
-    fn returns_correct_non_zero_gid_on_set() {
-        let mut key = MessageKey::new();
-        key.set_gid(Gid::from(123));
-        assert_eq!(key.gid(), Some(Gid::from(123)));
-    }
-
-    #[test]
-    fn returns_correct_non_zero_priority_on_set() {
-        let mut key = MessageKey::new();
-        key.set_priority(Priority::Informational);
-        assert_eq!(key.priority(), Priority::Informational);
-    }
-
-    #[test]
     fn returns_correct_non_zero_service_on_set() {
         let mut key = MessageKey::new();
         key.set_service(s(b"my-service.service"));
         assert_eq!(key.service(), Some(s(b"my-service.service")));
-    }
-
-    #[test]
-    fn returns_correct_zero_uid_on_set() {
-        let mut key = MessageKey::new();
-        key.set_uid(Uid::from(0));
-        assert_eq!(key.uid(), Some(Uid::from(0)));
-    }
-
-    #[test]
-    fn returns_correct_zero_gid_on_set() {
-        let mut key = MessageKey::new();
-        key.set_gid(Gid::from(0));
-        assert_eq!(key.gid(), Some(Gid::from(0)));
-    }
-
-    #[test]
-    fn returns_correct_zero_priority_on_set() {
-        let mut key = MessageKey::new();
-        key.set_priority(Priority::Emergency);
-        assert_eq!(key.priority(), Priority::Emergency);
     }
 
     // Per-group properties
@@ -336,8 +237,8 @@ mod test {
     fn orders_based_on_priority(a: Priority, b: Priority) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_priority(a);
-        key2.set_priority(b);
+        key1.priority = a;
+        key2.priority = b;
         key1.cmp(&key2) == a.cmp(&b)
     }
 
@@ -345,8 +246,8 @@ mod test {
     fn orders_based_on_uid(a: libc::uid_t, b: libc::uid_t) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_uid(Uid::from(a));
-        key2.set_uid(Uid::from(b));
+        key1.table_key.uid = Some(a);
+        key2.table_key.uid = Some(b);
         key1.cmp(&key2) == a.cmp(&b)
     }
 
@@ -354,32 +255,32 @@ mod test {
     fn orders_based_on_gid(a: libc::gid_t, b: libc::gid_t) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_gid(Gid::from(a));
-        key2.set_gid(Gid::from(b));
+        key1.table_key.gid = Some(a);
+        key2.table_key.gid = Some(b);
         key1.cmp(&key2) == a.cmp(&b)
     }
 
     #[quickcheck]
-    fn orders_based_on_service(a: ArbitraryService, b: ArbitraryService) -> bool {
+    fn orders_based_on_service(a: ServiceRepr, b: ServiceRepr) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
 
-        key1.set_service(a.as_service());
-        key2.set_service(b.as_service());
-        key1.cmp(&key2) == service_compare(a.as_service(), b.as_service())
+        key1.set_service(a.as_service().unwrap());
+        key2.set_service(b.as_service().unwrap());
+        key1.cmp(&key2) == service_compare(a.as_service().unwrap(), b.as_service().unwrap())
     }
 
     #[quickcheck]
     fn orders_based_on_priority_with_all_fields_initialized(a: Priority, b: Priority) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_priority(a);
-        key1.set_uid(Uid::from(123));
-        key1.set_gid(Gid::from(123));
+        key1.priority = a;
+        key1.table_key.uid = Some(123);
+        key1.table_key.gid = Some(123);
         key1.set_service(s(b"test.service"));
-        key2.set_priority(b);
-        key2.set_uid(Uid::from(123));
-        key2.set_gid(Gid::from(123));
+        key2.priority = b;
+        key2.table_key.uid = Some(123);
+        key2.table_key.gid = Some(123);
         key2.set_service(s(b"test.service"));
         key1.cmp(&key2) == a.cmp(&b)
     }
@@ -388,13 +289,13 @@ mod test {
     fn orders_based_on_uid_with_all_fields_initialized(a: libc::uid_t, b: libc::uid_t) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_priority(Priority::Debug);
-        key1.set_uid(Uid::from(a));
-        key1.set_gid(Gid::from(123));
+        key1.priority = Priority::Debug;
+        key1.table_key.uid = Some(a);
+        key1.table_key.gid = Some(123);
         key1.set_service(s(b"test.service"));
-        key2.set_priority(Priority::Debug);
-        key2.set_uid(Uid::from(b));
-        key2.set_gid(Gid::from(123));
+        key2.priority = Priority::Debug;
+        key2.table_key.uid = Some(b);
+        key2.table_key.gid = Some(123);
         key2.set_service(s(b"test.service"));
         key1.cmp(&key2) == a.cmp(&b)
     }
@@ -403,34 +304,31 @@ mod test {
     fn orders_based_on_gid_with_all_fields_initialized(a: libc::gid_t, b: libc::gid_t) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_priority(Priority::Debug);
-        key1.set_uid(Uid::from(123));
-        key1.set_gid(Gid::from(a));
+        key1.priority = Priority::Debug;
+        key1.table_key.uid = Some(123);
+        key1.table_key.gid = Some(a);
         key1.set_service(s(b"test.service"));
-        key2.set_priority(Priority::Debug);
-        key2.set_uid(Uid::from(123));
-        key2.set_gid(Gid::from(b));
+        key2.priority = Priority::Debug;
+        key2.table_key.uid = Some(123);
+        key2.table_key.gid = Some(b);
         key2.set_service(s(b"test.service"));
         key1.cmp(&key2) == a.cmp(&b)
     }
 
     #[quickcheck]
-    fn orders_based_on_service_with_all_fields_initialized(
-        a: ArbitraryService,
-        b: ArbitraryService,
-    ) -> bool {
+    fn orders_based_on_service_with_all_fields_initialized(a: ServiceRepr, b: ServiceRepr) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
 
-        key1.set_priority(Priority::Debug);
-        key1.set_uid(Uid::from(123));
-        key1.set_gid(Gid::from(123));
-        key1.set_service(a.as_service());
-        key2.set_priority(Priority::Debug);
-        key2.set_uid(Uid::from(123));
-        key2.set_gid(Gid::from(123));
-        key2.set_service(b.as_service());
-        key1.cmp(&key2) == service_compare(a.as_service(), b.as_service())
+        key1.priority = Priority::Debug;
+        key1.table_key.uid = Some(123);
+        key1.table_key.gid = Some(123);
+        key1.set_service(a.as_service().unwrap());
+        key2.priority = Priority::Debug;
+        key2.table_key.uid = Some(123);
+        key2.table_key.gid = Some(123);
+        key2.set_service(b.as_service().unwrap());
+        key1.cmp(&key2) == service_compare(a.as_service().unwrap(), b.as_service().unwrap())
     }
 
     // Absent-before-present properties
@@ -439,7 +337,7 @@ mod test {
     fn orders_no_uid_before_uid(uid: libc::uid_t) -> bool {
         let key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key2.set_uid(Uid::from(uid));
+        key2.table_key.uid = Some(uid);
         key1 < key2
     }
 
@@ -447,27 +345,27 @@ mod test {
     fn orders_no_gid_before_gid(gid: libc::gid_t) -> bool {
         let key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key2.set_gid(Gid::from(gid));
+        key2.table_key.gid = Some(gid);
         key1 < key2
     }
 
     #[quickcheck]
-    fn orders_no_service_before_service(service: ArbitraryService) -> bool {
+    fn orders_no_service_before_service(service: ServiceRepr) -> bool {
         let key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key2.set_service(service.as_service());
+        key2.set_service(service.as_service().unwrap());
         key1 < key2
     }
 
     // Inter-group properties
 
     #[test]
-    fn orders_min_priority_with_no_uid_before_lowest_priority_with_uid() {
+    fn orders_highest_priority_with_no_uid_before_lowest_priority_with_uid() {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_priority(Priority::Emergency);
-        key2.set_priority(Priority::Debug);
-        key2.set_uid(Uid::from(u32::MAX));
+        key1.priority = Priority::Emergency;
+        key2.priority = Priority::Debug;
+        key2.table_key.uid = Some(u32::MAX);
         assert!(key1 < key2, "{key1:?} < {key2:?}");
     }
 
@@ -475,18 +373,18 @@ mod test {
     fn orders_no_uid_max_gid_before_min_uid_min_gid() {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_gid(Gid::from(u32::MAX));
-        key2.set_uid(Uid::from(0));
-        key2.set_gid(Gid::from(0));
+        key1.table_key.gid = Some(u32::MAX);
+        key2.table_key.uid = Some(0);
+        key2.table_key.gid = Some(0);
         assert!(key1 < key2, "{key1:?} < {key2:?}");
     }
 
     #[test]
-    fn orders_max_gid_no_service_before_min_gid_min_service() {
+    fn orders_max_gid_min_service_before_min_gid_no_service() {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_gid(Gid::from(u32::MAX));
-        key2.set_service(s(b"-"));
+        key1.set_service(s(b"-"));
+        key2.table_key.gid = Some(u32::MAX);
         assert!(key1 < key2, "{key1:?} < {key2:?}");
     }
 
@@ -494,20 +392,20 @@ mod test {
     fn orders_no_uid_some_gid_before_some_uid_no_gid(a: libc::uid_t, b: libc::gid_t) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_gid(Gid::from(a));
-        key2.set_uid(Uid::from(b));
+        key1.table_key.gid = Some(a);
+        key2.table_key.uid = Some(b);
         key1 < key2
     }
 
     #[quickcheck]
-    fn orders_no_gid_some_service_before_some_gid_no_service(
+    fn orders_some_gid_no_service_before_no_gid_some_service(
         a: libc::gid_t,
-        b: ArbitraryService,
+        b: ServiceRepr,
     ) -> bool {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
-        key1.set_gid(Gid::from(a));
-        key2.set_service(b.as_service());
+        key1.set_service(b.as_service().unwrap());
+        key2.table_key.gid = Some(a);
         key1 < key2
     }
 }

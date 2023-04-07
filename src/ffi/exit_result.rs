@@ -5,17 +5,6 @@ use crate::prelude::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExitCode(pub u8);
 
-#[cfg(test)]
-impl Arbitrary for ExitCode {
-    fn arbitrary(g: &mut Gen) -> Self {
-        Self(Arbitrary::arbitrary(g))
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(self.0.shrink().map(ExitCode))
-    }
-}
-
 impl ExitCode {
     pub const fn from_raw(code: i32) -> ExitCode {
         ExitCode(truncate_i32_u8(code))
@@ -44,19 +33,21 @@ pub enum ExitResult {
 impl Arbitrary for ExitResult {
     fn arbitrary(g: &mut Gen) -> Self {
         match <bool>::arbitrary(g) {
-            true => ExitResult::Code(Arbitrary::arbitrary(g)),
+            true => ExitResult::Code(ExitCode(Arbitrary::arbitrary(g))),
             false => ExitResult::Signal(Arbitrary::arbitrary(g)),
         }
     }
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         match self {
-            ExitResult::Code(code) => Box::new(code.shrink().map(ExitResult::Code)),
+            ExitResult::Code(code) => {
+                Box::new(code.0.shrink().map(|c| ExitResult::Code(ExitCode(c))))
+            }
             ExitResult::Signal(signal) => Box::new(
                 signal
                     .shrink()
                     .map(ExitResult::Signal)
-                    .chain(ExitCode(u8::MAX).shrink().map(ExitResult::Code)),
+                    .chain(u8::MAX.shrink().map(|c| ExitResult::Code(ExitCode(c)))),
             ),
         }
     }
@@ -90,7 +81,7 @@ impl fmt::Display for ExitResult {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     use crate::ffi::sigrtmin;

@@ -6,15 +6,14 @@ license = "Apache-2.0"
 authors = ["Claudia Meadows (@dead-claudia)"]
 
 [dependencies]
-bitflags = "2.0.2"
 libc = "0.2.137"
 libsystemd-sys = "0.9.3"
 log = { version = "0.4.17", features = ["std"] }
 notify = "5.0.0"
 base64 = "0.21.0"
 tiny_http = "0.12.0"
-time = "0.3.20"
 zeroize = "1.5.7"
+const-str = { version = "0.5.4", features = ["std"] }
 
 [dev-dependencies]
 # Simplifies test setup and the `waitid` hack.

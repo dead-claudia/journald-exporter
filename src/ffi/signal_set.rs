@@ -3,13 +3,14 @@ use crate::prelude::*;
 use super::syscall_utils::syscall_check_int;
 use super::Signal;
 
-#[derive(Clone)]
 pub struct SignalSet {
     sigset: libc::sigset_t,
 }
 
 impl SignalSet {
     pub fn empty() -> SignalSet {
+        assert_not_miri();
+
         // SAFETY: Nothing is allocated, and I'm only using well-defined libc functions with valid
         // pointers.
         unsafe {
@@ -22,6 +23,8 @@ impl SignalSet {
     }
 
     pub fn add(&mut self, signal: Signal) {
+        assert_not_miri();
+
         // SAFETY: `self.sigset` is obviously initialized here, and `sigaddset` is the standard way
         // to add signals to a given sigset.
         unsafe {
@@ -34,6 +37,8 @@ impl SignalSet {
     }
 
     fn update_proc_mask(s: &SignalSet, how: libc::c_int) -> io::Result<()> {
+        assert_not_miri();
+
         // SAFETY: it's only passed in valid addresses, and the result is asserted.
         syscall_check_int("sigprocmask", unsafe {
             libc::sigprocmask(how, &s.sigset, std::ptr::null_mut())
@@ -59,6 +64,8 @@ impl FromIterator<Signal> for SignalSet {
 
 impl<'a> FromIterator<&'a Signal> for SignalSet {
     fn from_iter<I: IntoIterator<Item = &'a Signal>>(iter: I) -> Self {
+        assert_not_miri();
+
         let mut set = SignalSet::empty();
         for signal in iter {
             set.add(*signal);

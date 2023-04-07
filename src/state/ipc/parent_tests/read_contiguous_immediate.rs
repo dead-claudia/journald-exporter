@@ -138,7 +138,7 @@ fn processes_partial_response_metrics() {
 }
 
 #[test]
-fn processes_receive_metrics_zero_data_bytes_ingested() {
+fn processes_receive_metrics_zero_data_ingested_bytes() {
     static D: Uncontended<Decoder> = Uncontended::new(Decoder::new());
 
     #[rustfmt::skip]
@@ -189,21 +189,27 @@ fn processes_receive_metrics_2_byte_data_len_ingested() {
     static D: Uncontended<Decoder> = Uncontended::new(Decoder::new());
 
     const REQUEST_LENGTH: usize = 1000;
+    let expected_hex = gen_hex(REQUEST_LENGTH);
     let mut req = Vec::with_capacity(declarative_request![].len() + REQUEST_LENGTH + 9);
-    req.extend_from_slice(declarative_request![]);
-    // Operation ID
-    req.push(0x00);
-    // Data length
-    req.extend_from_slice(&truncate_usize_u32(REQUEST_LENGTH).to_le_bytes());
-    // Data
-    req.extend((0..REQUEST_LENGTH).map(index_hex));
+    write_slices(
+        &mut req,
+        &[
+            declarative_request![],
+            // Operation ID
+            &[0x00],
+            // Data length
+            &truncate_usize_u32(REQUEST_LENGTH).to_le_bytes(),
+            // Data
+            &expected_hex,
+        ],
+    );
 
     D.lock().read_bytes(&req);
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
             key_set: None,
-            metrics: Some(expected_data_hex(REQUEST_LENGTH)),
+            metrics: Some(expected_hex),
         }
     );
 }
@@ -215,21 +221,27 @@ fn processes_receive_metrics_3_byte_data_len_ingested() {
     static D: Uncontended<Decoder> = Uncontended::new(Decoder::new());
 
     const REQUEST_LENGTH: usize = 200_000;
+    let expected_hex = gen_hex(REQUEST_LENGTH);
     let mut req = Vec::with_capacity(declarative_request![].len() + REQUEST_LENGTH + 9);
-    req.extend_from_slice(declarative_request![]);
-    // Operation ID
-    req.push(0x00);
-    // Data length
-    req.extend_from_slice(&truncate_usize_u32(REQUEST_LENGTH).to_le_bytes());
-    // Data
-    req.extend((0..REQUEST_LENGTH).map(index_hex));
+    write_slices(
+        &mut req,
+        &[
+            declarative_request![],
+            // Operation ID
+            &[0x00],
+            // Data length
+            &truncate_usize_u32(REQUEST_LENGTH).to_le_bytes(),
+            // Data
+            &expected_hex,
+        ],
+    );
 
     D.lock().read_bytes(&req);
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
             key_set: None,
-            metrics: Some(expected_data_hex(REQUEST_LENGTH)),
+            metrics: Some(expected_hex),
         }
     );
 }
@@ -241,21 +253,27 @@ fn processes_receive_metrics_4_byte_data_len_ingested() {
     static D: Uncontended<Decoder> = Uncontended::new(Decoder::new());
 
     const REQUEST_LENGTH: usize = 50_000_000;
+    let expected_hex = gen_hex(REQUEST_LENGTH);
     let mut req = Vec::with_capacity(declarative_request![].len() + REQUEST_LENGTH + 9);
-    req.extend_from_slice(declarative_request![]);
-    // Operation ID
-    req.push(0x00);
-    // Data length
-    req.extend_from_slice(&truncate_usize_u32(REQUEST_LENGTH).to_le_bytes());
-    // Data
-    req.extend((0..REQUEST_LENGTH).map(index_hex));
+    write_slices(
+        &mut req,
+        &[
+            declarative_request![],
+            // Operation ID
+            &[0x00],
+            // Data length
+            &truncate_usize_u32(REQUEST_LENGTH).to_le_bytes(),
+            // Data
+            &expected_hex,
+        ],
+    );
 
     D.lock().read_bytes(&req);
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
             key_set: None,
-            metrics: Some(expected_data_hex(REQUEST_LENGTH)),
+            metrics: Some(expected_hex),
         }
     );
 }

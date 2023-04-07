@@ -23,7 +23,7 @@ fn get_test_name_from_backtrace_line(line: &str) -> Option<&str> {
 
     if !line
         .split("::")
-        .any(|segment| segment == "test" || segment.ends_with("_tests"))
+        .any(|segment| segment == "tests" || segment.ends_with("_tests"))
     {
         return None;
     }
@@ -106,7 +106,7 @@ impl<T, const N: usize> PerAttemptStatic<T, N> {
 
 // Skip these tests under Miri. They're test utilities and would just slow down Miri test runs.
 #[cfg(not(miri))]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

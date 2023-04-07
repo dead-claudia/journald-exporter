@@ -5,7 +5,6 @@
 
 use crate::prelude::*;
 
-use crate::ffi::NormalizeErrno;
 use std::thread::JoinHandle;
 
 pub type ThreadTask = Box<dyn FnOnce() -> io::Result<()> + Send>;
@@ -39,7 +38,7 @@ impl Drop for ThreadHandle {
                 Ok(Err(e)) if !std::thread::panicking() => {
                     panic!(
                         "Uncaught error from joined thread: {}",
-                        NormalizeErrno(&e, None)
+                        normalize_errno(e, None)
                     )
                 }
                 Ok(_) => {}
@@ -49,7 +48,7 @@ impl Drop for ThreadHandle {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     // Improves readability of assertions
     #![allow(clippy::bool_assert_comparison)]
 

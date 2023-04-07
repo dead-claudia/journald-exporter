@@ -106,7 +106,7 @@ pub fn error_shrink(error: &Error) -> Box<dyn Iterator<Item = Error>> {
 
 // Skip these tests under Miri. They're test utilities and would just slow down Miri test runs.
 #[cfg(not(miri))]
-mod test {
+mod tests {
     #![allow(clippy::bool_assert_comparison)]
 
     use super::*;
