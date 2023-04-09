@@ -200,6 +200,7 @@ function runChildTest() {
     let fetchCtrl = new AbortController()
     let killCtrl = new AbortController()
     let terminationAttempted = false
+    let stderr = []
     let fetchTimer, unitName
 
     const child = child_process.spawn(
@@ -212,7 +213,7 @@ function runChildTest() {
             "--property=TimeoutStartSec=5s",
             args.binary, "--port", args.port, "--key-dir", args.keyDir,
         ],
-        {stdio: ["ignore", "ignore", "pipe"], signal: killCtrl.signal},
+        {stdio: ["ignore", "inherit", "pipe"], signal: killCtrl.signal},
     )
 
     function terminateHandler() {
@@ -265,6 +266,7 @@ function runChildTest() {
             rl.off("line", onLine)
             rl.close()
             child.stderr.resume()
+            stderr = undefined
 
             // Just spawn and forget. It's just for visibility.
             child_process.spawn(
@@ -275,6 +277,8 @@ function runChildTest() {
                 .on("error", reportAsyncError)
 
             fetchTimer = setTimeout(startFetch, 2000)
+        } else {
+            stderr.push(line)
         }
     }
 
@@ -285,7 +289,10 @@ function runChildTest() {
     }
 
     function onExit(code, signal) {
-        console.error(`[INTEG] Child exited`)
+        console.error(`[INTEG] Child exited with code ${code}, signal ${signal}`)
+        if (stderr) {
+            for (const line of stderr) console.error(line)
+        }
         if (code) {
             process.exitCode = code
         } else if (signal) {
