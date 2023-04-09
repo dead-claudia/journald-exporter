@@ -7,6 +7,7 @@ use crate::ffi::current_uid;
 use notify::recommended_watcher;
 use notify::Watcher;
 use std::os::unix::prelude::MetadataExt;
+use std::os::unix::prelude::OsStrExt;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
 
@@ -65,10 +66,45 @@ pub fn write_current_key_set(s: &'static ParentIpcState<impl ParentIpcMethods>) 
 }
 
 fn to_io_error(error: notify::Error) -> Error {
-    match error.kind {
-        notify::ErrorKind::Io(e) => e,
-        _ => string_err(error.to_string()),
+    let (result, e) = match error.kind {
+        notify::ErrorKind::Generic(v) => (CowStr::Owned(v.into()), None),
+        notify::ErrorKind::Io(e) => (CowStr::Owned(e.to_string().into()), Some(e)),
+        notify::ErrorKind::PathNotFound => (CowStr::Borrowed("No path was found."), None),
+        notify::ErrorKind::WatchNotFound => (CowStr::Borrowed("No watch was found"), None),
+        notify::ErrorKind::InvalidConfig(_) => {
+            (CowStr::Borrowed("BUG: Invalid configuration"), None)
+        }
+        notify::ErrorKind::MaxFilesWatch => (CowStr::Borrowed("OS file watch limit reached"), None),
+    };
+
+    let (last, initial) = match (e, error.paths.split_last()) {
+        (_, Some(v)) => v,
+        (Some(e), None) => return e,
+        (None, None) => return cow_err(result),
+    };
+
+    let mut result = result.into_owned().into_string();
+
+    result.push_str(" about ");
+
+    if !initial.is_empty() {
+        let mut is_next = false;
+        for path in initial {
+            if !is_next {
+                result.push_str(", ")
+            }
+            is_next = true;
+            binary_to_display(&mut result, path.as_os_str().as_bytes());
+        }
+        if !is_next {
+            result.push_str(", ")
+        }
+        result.push_str("and ");
     }
+
+    binary_to_display(&mut result, last.as_os_str().as_bytes());
+
+    string_err(result.into())
 }
 
 // Assert not writable by group or other, and not readable by group.
@@ -123,30 +159,35 @@ fn resolve_file_name(entry: std::fs::DirEntry) -> std::path::PathBuf {
 
 #[cold]
 fn report_insecure(path: &std::path::Path, metadata: std::fs::Metadata) -> Error {
-    string_err(format!(
-        "{} has insecure permissions: {}",
-        path.display(),
-        insecure_message(metadata),
-    ))
+    string_err(
+        format!(
+            "{} has insecure permissions: {}",
+            path.display(),
+            insecure_message(metadata),
+        )
+        .into(),
+    )
 }
 
 fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
     let metadata = entry.metadata()?;
 
     if !metadata.file_type().is_file() {
-        return Err(string_err(format!(
-            "{} is not a file",
-            resolve_file_name(entry).display()
-        )));
+        return Err(string_err(
+            format!("{} is not a file", resolve_file_name(entry).display()).into(),
+        ));
     }
 
     // Make polymorphic based on the current user. Easier to clean up that way in test, and in prod
     // it always checks against the root user anyways.
     if metadata.uid() != current_uid() {
-        return Err(string_err(format!(
-            "{} is not owned by the root user",
-            resolve_file_name(entry).display()
-        )));
+        return Err(string_err(
+            format!(
+                "{} is not owned by the root user",
+                resolve_file_name(entry).display()
+            )
+            .into(),
+        ));
     }
 
     fn perms_are_insecure(metadata: &std::fs::Metadata) -> bool {
@@ -159,10 +200,13 @@ fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
 
     let key_data = std::fs::read_to_string(entry.path())?;
     Key::from_hex(key_data.trim().as_bytes()).ok_or_else(|| {
-        string_err(format!(
-            "{} does not contain a valid key",
-            resolve_file_name(entry).display()
-        ))
+        string_err(
+            format!(
+                "{} does not contain a valid key",
+                resolve_file_name(entry).display()
+            )
+            .into(),
+        )
     })
 }
 
@@ -467,7 +511,7 @@ mod tests {
 
                 let target = &state.methods().child_input;
                 target.reset_data_written();
-                target.enqueue_write_ok(expected.len());
+                target.enqueue_write(Ok(expected.len()));
 
                 let _stdin_lease = t.static_state.connect_stdin();
 

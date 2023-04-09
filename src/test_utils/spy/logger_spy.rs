@@ -27,6 +27,8 @@ impl log::Log for LogStderr {
 }
 
 struct LogCapture {
+    // Using a `String` so it'll compare against `&str` correctly. Not sure why `PartialEq<&T>`
+    // isn't implemented for `Box<T>` or vice versa.
     inner: Mutex<Vec<String>>,
 }
 

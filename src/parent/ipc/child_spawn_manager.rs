@@ -115,15 +115,15 @@ mod tests {
         S.init_test_state();
 
         let instant = Instant::now();
-        S.enqueue_child_spawn_err(libc::ENOENT);
+        S.enqueue_child_spawn(Err(libc::ENOENT));
         S.enqueue_next_instant(instant + Duration::from_millis(0));
-        S.enqueue_child_spawn_err(libc::EACCES);
+        S.enqueue_child_spawn(Err(libc::EACCES));
         S.enqueue_next_instant(instant + Duration::from_millis(100));
-        S.enqueue_child_spawn_err(libc::EBUSY);
+        S.enqueue_child_spawn(Err(libc::EBUSY));
         S.enqueue_next_instant(instant + Duration::from_millis(200));
-        S.enqueue_child_spawn_err(libc::EMFILE);
+        S.enqueue_child_spawn(Err(libc::EMFILE));
         S.enqueue_next_instant(instant + Duration::from_millis(300));
-        S.enqueue_child_spawn_err(libc::ELOOP);
+        S.enqueue_child_spawn(Err(libc::ELOOP));
         S.enqueue_next_instant(instant + Duration::from_millis(400));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
@@ -168,11 +168,11 @@ mod tests {
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
         S.init_test_state();
 
-        S.enqueue_child_spawn_ok(&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone());
+        S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
         S.run_ipc_spawn(&mut ipc, None, ExpectedSpawnResult::Ready, &[]);
-        assert_eq!(S.child_wait(), EXIT_STATUS_TERMINATED);
+        assert_eq!(S.state.methods().child_wait(), EXIT_STATUS_TERMINATED);
 
         S.assert_no_calls_remaining();
     }
@@ -184,9 +184,9 @@ mod tests {
         S.init_test_state();
 
         let instant = Instant::now();
-        S.enqueue_child_spawn_err(libc::ENOENT);
+        S.enqueue_child_spawn(Err(libc::ENOENT));
         S.enqueue_next_instant(instant + Duration::from_millis(0));
-        S.enqueue_child_spawn_ok(&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone());
+        S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
         S.run_ipc_spawn(&mut ipc, None, ExpectedSpawnResult::Err(libc::ENOENT), &[]);
@@ -196,7 +196,7 @@ mod tests {
             ExpectedSpawnResult::Ready,
             &["Child errored during spawn: ENOENT: No such file or directory"],
         );
-        assert_eq!(S.child_wait(), EXIT_STATUS_TERMINATED);
+        assert_eq!(S.state.methods().child_wait(), EXIT_STATUS_TERMINATED);
 
         S.assert_no_calls_remaining();
     }
@@ -208,11 +208,11 @@ mod tests {
         S.init_test_state();
 
         let instant = Instant::now();
-        S.enqueue_child_spawn_err(libc::ENOENT);
+        S.enqueue_child_spawn(Err(libc::ENOENT));
         S.enqueue_next_instant(instant + Duration::from_millis(0));
-        S.enqueue_child_spawn_err(libc::EACCES);
+        S.enqueue_child_spawn(Err(libc::EACCES));
         S.enqueue_next_instant(instant + Duration::from_millis(100));
-        S.enqueue_child_spawn_ok(&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone());
+        S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
         S.run_ipc_spawn(&mut ipc, None, ExpectedSpawnResult::Err(libc::ENOENT), &[]);
@@ -229,7 +229,7 @@ mod tests {
             &["Child errored during spawn: EACCES: Permission denied"],
         );
 
-        assert_eq!(S.child_wait(), EXIT_STATUS_TERMINATED);
+        assert_eq!(S.state.methods().child_wait(), EXIT_STATUS_TERMINATED);
 
         S.assert_no_calls_remaining();
     }
@@ -241,13 +241,13 @@ mod tests {
         S.init_test_state();
 
         let instant = Instant::now();
-        S.enqueue_child_spawn_err(libc::ENOENT);
+        S.enqueue_child_spawn(Err(libc::ENOENT));
         S.enqueue_next_instant(instant + Duration::from_millis(0));
-        S.enqueue_child_spawn_err(libc::EACCES);
+        S.enqueue_child_spawn(Err(libc::EACCES));
         S.enqueue_next_instant(instant + Duration::from_millis(100));
-        S.enqueue_child_spawn_err(libc::EBUSY);
+        S.enqueue_child_spawn(Err(libc::EBUSY));
         S.enqueue_next_instant(instant + Duration::from_millis(200));
-        S.enqueue_child_spawn_ok(&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone());
+        S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
         S.run_ipc_spawn(&mut ipc, None, ExpectedSpawnResult::Err(libc::ENOENT), &[]);
@@ -270,7 +270,7 @@ mod tests {
             &["Child errored during spawn: EBUSY: Device or resource busy"],
         );
 
-        assert_eq!(S.child_wait(), EXIT_STATUS_TERMINATED);
+        assert_eq!(S.state.methods().child_wait(), EXIT_STATUS_TERMINATED);
 
         S.assert_no_calls_remaining();
     }
@@ -282,15 +282,15 @@ mod tests {
         S.init_test_state();
 
         let instant = Instant::now();
-        S.enqueue_child_spawn_err(libc::ENOENT);
+        S.enqueue_child_spawn(Err(libc::ENOENT));
         S.enqueue_next_instant(instant + Duration::from_millis(0));
-        S.enqueue_child_spawn_err(libc::EACCES);
+        S.enqueue_child_spawn(Err(libc::EACCES));
         S.enqueue_next_instant(instant + Duration::from_millis(100));
-        S.enqueue_child_spawn_err(libc::EBUSY);
+        S.enqueue_child_spawn(Err(libc::EBUSY));
         S.enqueue_next_instant(instant + Duration::from_millis(200));
-        S.enqueue_child_spawn_err(libc::EMFILE);
+        S.enqueue_child_spawn(Err(libc::EMFILE));
         S.enqueue_next_instant(instant + Duration::from_millis(300));
-        S.enqueue_child_spawn_ok(&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone());
+        S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
         S.run_ipc_spawn(&mut ipc, None, ExpectedSpawnResult::Err(libc::ENOENT), &[]);
@@ -319,7 +319,7 @@ mod tests {
             &["Child errored during spawn: EMFILE: Too many open files"],
         );
 
-        assert_eq!(S.child_wait(), EXIT_STATUS_TERMINATED);
+        assert_eq!(S.state.methods().child_wait(), EXIT_STATUS_TERMINATED);
 
         S.assert_no_calls_remaining();
     }
@@ -331,17 +331,17 @@ mod tests {
         S.init_test_state();
 
         let instant = Instant::now();
-        S.enqueue_child_spawn_err(libc::ENOENT);
+        S.enqueue_child_spawn(Err(libc::ENOENT));
         S.enqueue_next_instant(instant + Duration::from_millis(0));
-        S.enqueue_child_spawn_err(libc::EACCES);
+        S.enqueue_child_spawn(Err(libc::EACCES));
         S.enqueue_next_instant(instant + Duration::from_millis(100));
-        S.enqueue_child_spawn_err(libc::EBUSY);
+        S.enqueue_child_spawn(Err(libc::EBUSY));
         S.enqueue_next_instant(instant + Duration::from_millis(200));
-        S.enqueue_child_spawn_err(libc::EMFILE);
+        S.enqueue_child_spawn(Err(libc::EMFILE));
         S.enqueue_next_instant(instant + Duration::from_millis(300));
-        S.enqueue_child_spawn_err(libc::ELOOP);
+        S.enqueue_child_spawn(Err(libc::ELOOP));
         S.enqueue_next_instant(instant + Duration::from_millis(10000));
-        S.enqueue_child_spawn_ok(&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone());
+        S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
         let mut ipc = ChildSpawnManager::new(&S.state);
         S.run_ipc_spawn(&mut ipc, None, ExpectedSpawnResult::Err(libc::ENOENT), &[]);
@@ -376,7 +376,7 @@ mod tests {
             &["Child errored during spawn: ELOOP: Too many levels of symbolic links"],
         );
 
-        assert_eq!(S.child_wait(), EXIT_STATUS_TERMINATED);
+        assert_eq!(S.state.methods().child_wait(), EXIT_STATUS_TERMINATED);
 
         S.assert_no_calls_remaining();
     }

@@ -237,47 +237,62 @@ impl<M: ParentIpcMethods> MessageReader<M> {
             None => "(unknown)",
         };
 
+        fn emit_small_malformed_unit_value(unit: &str, field_name: &str, field_value: &[u8]) {
+            let mut result = String::new();
+            result.push_str("Received malformed field '");
+            result.push_str(field_name);
+            result.push_str("' in message from unit '");
+            result.push_str(unit);
+            result.push_str("': '");
+            emit_truncatable_value_and_tail(result, field_value);
+        }
+
+        fn emit_truncatable_value_and_tail(mut result: String, field_value: &[u8]) {
+            binary_to_display(
+                &mut result,
+                &field_value[..MAX_SERVICE_LEN.min(field_value.len())],
+            );
+            if field_value.len() >= MAX_SERVICE_LEN {
+                result.push_str("...' (truncated)");
+            } else {
+                result.push('\'');
+            }
+            log::warn!("{}", result);
+        }
+
         if let Some(field_value) = &self.malformed.service {
-            match self.inner.service_error_type {
+            let prefix = match self.inner.service_error_type {
                 ServiceErrorType::TooLong => {
-                    log::warn!(
-                        "Received too-long field '_SYSTEMD_UNIT' in message: '{}...' (truncated)",
-                        // Don't show the whole string - it's a waste of memory and storage and,
-                        // since this utility also sees the messages it generates, it could result
-                        // in breaching the data threshold and resulting in a much less informative
-                        // error instead. The `.min` is so it doesn't break in test with the much
-                        // smaller strings.
-                        BinaryToDisplay(&field_value[..MAX_SERVICE_LEN.min(field_value.len())]),
-                    );
+                    "Received too-long field '_SYSTEMD_UNIT' in message: '"
                 }
                 ServiceErrorType::Invalid => {
-                    log::warn!(
-                        "Received malformed field '_SYSTEMD_UNIT' in message: '{}'",
-                        BinaryToDisplay(field_value),
-                    );
+                    "Received malformed field '_SYSTEMD_UNIT' in message: '"
                 }
-            }
+            };
+
+            let mut result = String::new();
+            result.push_str(prefix);
+            // Don't show the whole string - it's a waste of memory and storage and,
+            // since this utility also sees the messages it generates, it could result
+            // in breaching the data threshold and resulting in a much less informative
+            // error instead. The `.min` is so it doesn't break in test with the much
+            // smaller strings.
+            emit_truncatable_value_and_tail(result, field_value);
         }
 
         if let Some(field_value) = &self.malformed.priority {
-            log::warn!(
-                "Received malformed field 'PRIORITY' in message from unit '{unit}': '{}'",
-                BinaryToDisplay(field_value),
-            );
+            // Anything longer than 1 character is invalid, so it's okay to truncate to 256
+            emit_small_malformed_unit_value(unit, "PRIORITY", field_value);
         }
 
         if let Some(field_value) = &self.malformed.uid {
-            log::warn!(
-                "Received malformed field '_UID' in message from unit '{unit}': '{}'",
-                BinaryToDisplay(field_value),
-            );
+            // Anything longer than 5 characters is invalid, so it's okay to truncate to 256
+            emit_small_malformed_unit_value(unit, "_UID", field_value);
         }
 
         if let Some(field_value) = &self.malformed.gid {
-            log::warn!(
-                "Received malformed field '_GID' in message from unit '{unit}': '{}'",
-                BinaryToDisplay(field_value),
-            );
+            // Anything longer than 5 characters is invalid, so it's okay to truncate to 256
+            emit_small_malformed_unit_value(unit, "_GID", field_value);
         }
     }
 }

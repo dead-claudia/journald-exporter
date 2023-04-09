@@ -183,7 +183,7 @@ mod tests {
                 uid: current_uid(),
                 gid: current_gid(),
             },
-            Vec::new(),
+            Box::new([]),
             PromEnvironment::new(mock_system_time(123, 456)),
             std::path::PathBuf::new(),
         );
@@ -197,13 +197,13 @@ mod tests {
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
-        S.methods().child_spawn.enqueue_ok((
+        S.methods().child_spawn.enqueue_io(Ok((
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
                 errors: Vec::new(),
             },
-        ));
+        )));
 
         S.methods()
             .child_spawn(&S)
@@ -241,13 +241,13 @@ mod tests {
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
-        S.methods().child_spawn.enqueue_ok((
+        S.methods().child_spawn.enqueue_io(Ok((
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: None,
                 errors: Vec::new(),
             },
-        ));
+        )));
 
         S.methods()
             .child_spawn(&S)
@@ -284,7 +284,7 @@ mod tests {
             ParentIpcState::new("command", FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
 
-        S.methods().child_spawn.enqueue_err(libc::ENOENT);
+        S.methods().child_spawn.enqueue_io(Err(libc::ENOENT));
 
         match S.methods().child_spawn(&S) {
             Ok(_) => panic!("Expected `spawn_child` to return an error"),
@@ -301,13 +301,13 @@ mod tests {
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
-        S.methods().child_spawn.enqueue_ok((
+        S.methods().child_spawn.enqueue_io(Ok((
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
                 errors: Vec::new(),
             },
-        ));
+        )));
 
         S.methods()
             .child_spawn(&S)
@@ -338,13 +338,13 @@ mod tests {
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
-        S.methods().child_spawn.enqueue_ok((
+        S.methods().child_spawn.enqueue_io(Ok((
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
                 errors: Vec::new(),
             },
-        ));
+        )));
 
         let (mut child_input, _) = S
             .methods()
@@ -358,7 +358,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(10));
         assert_eq!(SPAWN_CHILD_NOTIFY.get(), ChildState::Terminated);
 
-        S.methods().child_input.enqueue_write_ok(8);
+        S.methods().child_input.enqueue_write(Ok(8));
         child_input.write_all(b"12345678").unwrap();
 
         S.methods().child_wait();
@@ -377,13 +377,13 @@ mod tests {
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
-        S.methods().child_spawn.enqueue_ok((
+        S.methods().child_spawn.enqueue_io(Ok((
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
                 errors: Vec::new(),
             },
-        ));
+        )));
 
         S.methods()
             .child_spawn(&S)
@@ -398,7 +398,7 @@ mod tests {
 
         S.methods()
             .child_output
-            .enqueue_read_ok(b"0123456789abcdef");
+            .enqueue_read(Ok(b"0123456789abcdef"));
 
         let mut output = [0_u8; 16];
         assert_result_eq((&S.methods().child_output).read(&mut output), Ok(16));
@@ -420,13 +420,13 @@ mod tests {
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
-        S.methods().child_spawn.enqueue_ok((
+        S.methods().child_spawn.enqueue_io(Ok((
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
                 errors: Vec::new(),
             },
-        ));
+        )));
 
         S.methods()
             .child_spawn(&S)
@@ -437,7 +437,7 @@ mod tests {
 
         let mut output = [0; 16];
 
-        S.methods().child_output.enqueue_read_err(libc::EPIPE);
+        S.methods().child_output.enqueue_read(Err(libc::EPIPE));
 
         assert_result_eq(
             (&S.methods().child_output).read(&mut output),

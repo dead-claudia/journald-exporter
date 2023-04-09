@@ -276,10 +276,11 @@ mod tests {
             guard.expect_logs(&[]);
         });
 
-        fn get_data(journal: &mut NativeJournalRef, field: &'static str) -> io::Result<String> {
+        fn get_data(journal: &mut NativeJournalRef, field: &'static str) -> io::Result<Box<str>> {
             Ok(
                 String::from_utf8_lossy(journal.get_data(&CString::new(field).unwrap())?)
-                    .into_owned(),
+                    .into_owned()
+                    .into(),
             )
         }
 
@@ -328,18 +329,15 @@ mod tests {
                 Some(&HashMap::from_iter([
                     (
                         "TEST_LABEL_ONE",
-                        "journald-exporter native_journal_ref_finds_new_journal_entries 1"
-                            .to_owned(),
+                        "journald-exporter native_journal_ref_finds_new_journal_entries 1".into(),
                     ),
                     (
                         "TEST_LABEL_TWO",
-                        "journald-exporter native_journal_ref_finds_new_journal_entries 2"
-                            .to_owned(),
+                        "journald-exporter native_journal_ref_finds_new_journal_entries 2".into(),
                     ),
                     (
                         "TEST_LABEL_THREE",
-                        "journald-exporter native_journal_ref_finds_new_journal_entries 3"
-                            .to_owned(),
+                        "journald-exporter native_journal_ref_finds_new_journal_entries 3".into(),
                     ),
                 ])),
             );

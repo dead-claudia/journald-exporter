@@ -31,7 +31,7 @@ fn get_test_name_from_backtrace_line(line: &str) -> Option<&str> {
     Some(line)
 }
 
-fn get_test_name_from_backtrace(backtrace: Backtrace) -> String {
+fn get_test_name_from_backtrace(backtrace: Backtrace) -> Box<str> {
     backtrace
         .to_string()
         .lines()
@@ -40,7 +40,7 @@ fn get_test_name_from_backtrace(backtrace: Backtrace) -> String {
         .rev()
         .find_map(get_test_name_from_backtrace_line)
         .unwrap_or("(unknown)")
-        .to_owned()
+        .into()
 }
 
 // Output isn't perfect, but good enough to not be too noisy.

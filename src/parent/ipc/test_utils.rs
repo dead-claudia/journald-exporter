@@ -77,7 +77,7 @@ impl StaticState {
                 uid: current_uid(),
                 gid: current_gid(),
             },
-            Vec::new(),
+            Box::new([]),
             PromEnvironment::new(mock_system_time(123, 456)),
             key_dir,
         );
@@ -125,31 +125,19 @@ impl StaticState {
         self.state.methods().next_instant.enqueue(result);
     }
 
-    pub fn enqueue_child_spawn_ok(
+    pub fn enqueue_child_spawn(
         &'static self,
-        notify: &'static ChildStateNotify,
-        status: IpcExitStatus,
+        result: Result<(&'static ChildStateNotify, IpcExitStatus), libc::c_int>,
     ) {
-        self.state
-            .methods()
-            .child_spawn
-            .enqueue_ok((notify, status));
+        self.state.methods().child_spawn.enqueue_io(result);
     }
 
-    pub fn enqueue_child_spawn_err(&'static self, code: libc::c_int) {
-        self.state.methods().child_spawn.enqueue_err(code);
+    pub fn enqueue_child_input(&'static self, result: Result<usize, libc::c_int>) {
+        self.state.methods().child_input.enqueue_write(result);
     }
 
-    pub fn enqueue_child_input_ok(&'static self, result: usize) {
-        self.state.methods().child_input.enqueue_write_ok(result);
-    }
-
-    // pub fn enqueue_child_input_err(&'static self, code: libc::c_int) {
-    //     self.state.methods().child_input.enqueue_write_err(code);
-    // }
-
-    pub fn enqueue_child_output_ok(&'static self, result: &'static [u8]) {
-        self.state.methods().child_output.enqueue_read_ok(result);
+    pub fn enqueue_child_output(&'static self, result: Result<&'static [u8], libc::c_int>) {
+        self.state.methods().child_output.enqueue_read(result);
     }
 
     pub fn enqueue_child_output_ok_spy(
@@ -161,18 +149,6 @@ impl StaticState {
             .methods()
             .child_output
             .enqueue_read_ok_spy(result, spy);
-    }
-
-    pub fn enqueue_child_output_err(&'static self, code: libc::c_int) {
-        self.state.methods().child_output.enqueue_read_err(code);
-    }
-
-    // pub fn child_terminate(&'static 'static self) -> io::Result<()> {
-    //     self.state.methods().child_terminate()
-    // }
-
-    pub fn child_wait(&'static self) -> IpcExitStatus {
-        self.state.methods().child_wait()
     }
 
     pub fn assert_input_sent(&'static self, expected: &[u8]) {

@@ -34,18 +34,21 @@ pub enum ArgsError {
 }
 
 impl ArgsError {
-    pub fn as_str(&self) -> std::borrow::Cow<'static, str> {
+    pub fn as_str(&self) -> CowStr<'static> {
         match self {
-            ArgsError::ShowHelp => std::borrow::Cow::Borrowed(super::help::HELP_STRING),
-            ArgsError::ShowVersion => std::borrow::Cow::Borrowed(super::help::VERSION_STRING),
-            ArgsError::MissingPort => std::borrow::Cow::Borrowed("A port is required."),
-            ArgsError::InvalidPort => std::borrow::Cow::Borrowed("Port is invalid."),
-            ArgsError::MissingKeyDir => std::borrow::Cow::Borrowed("Key directory missing."),
-            ArgsError::EmptyKeyDir => std::borrow::Cow::Borrowed("Key directory cannot be empty."),
-            ArgsError::UnknownFlag(option) => std::borrow::Cow::Owned(format!(
-                "Unknown flag or option: '{}'",
-                BinaryToDisplay(option.as_bytes())
-            )),
+            ArgsError::ShowHelp => CowStr::Borrowed(super::help::HELP_STRING),
+            ArgsError::ShowVersion => CowStr::Borrowed(super::help::VERSION_STRING),
+            ArgsError::MissingPort => CowStr::Borrowed("A port is required."),
+            ArgsError::InvalidPort => CowStr::Borrowed("Port is invalid."),
+            ArgsError::MissingKeyDir => CowStr::Borrowed("Key directory missing."),
+            ArgsError::EmptyKeyDir => CowStr::Borrowed("Key directory cannot be empty."),
+            ArgsError::UnknownFlag(option) => {
+                let mut result = String::new();
+                result.push_str("Unknown flag or option: '");
+                binary_to_display(&mut result, option.as_bytes());
+                result.push('\'');
+                CowStr::Owned(result.into())
+            }
         }
     }
 }

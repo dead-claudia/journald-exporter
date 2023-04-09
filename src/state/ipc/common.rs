@@ -2,9 +2,7 @@ use crate::prelude::*;
 
 pub fn unknown_byte(byte: u8) -> ! {
     let mut result = *b"Unknown IPC byte '  '";
-    let (hi, lo) = to_hex_pair(byte);
-    result[18] = hi;
-    result[19] = lo;
+    [result[18], result[19]] = to_hex_pair(byte);
     // It's guaranteed pure ASCII.
     match std::str::from_utf8(&result) {
         Ok(result) => panic!("{}", result),

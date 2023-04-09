@@ -27,14 +27,8 @@ impl WriteSpy {
         self.data.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
-    /// Note: the result is merely the maximum allowed to be returned. The actual result may be
-    /// lower based on the buffer sent to be written with.
-    pub fn enqueue_write_ok(&self, result: usize) {
-        self.inner.enqueue_ok(result);
-    }
-
-    pub fn enqueue_write_err(&self, code: libc::c_int) {
-        self.inner.enqueue_err(code);
+    pub fn enqueue_write(&self, result: Result<usize, libc::c_int>) {
+        self.inner.enqueue_io(result);
     }
 
     #[track_caller]

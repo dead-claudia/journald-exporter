@@ -41,7 +41,7 @@ pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
 
     IPC_STATE.init_dynamic(
         child_user_group,
-        vec![String::from("--child-process"), args.port.to_string()],
+        Box::new(["--child-process".into(), args.port.to_string().into()]),
         PromEnvironment::new(SystemTime::now()),
         args.key_dir,
     );

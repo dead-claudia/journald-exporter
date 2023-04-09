@@ -45,7 +45,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "String data contains a null character."]
+    #[should_panic = "String data contains a null character: \"01234\\x0056789\""]
     fn cursor_new_panics_if_data_contains_zero() {
         Cursor::new(b"01234\x0056789");
     }

@@ -169,11 +169,7 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
 }
 
 impl<K: Eq + Hash, I, O> CallSpyMap<K, I, io::Result<O>> {
-    pub fn enqueue_ok(&self, key: K, result: O) {
-        self.enqueue(key, Ok(result));
-    }
-
-    pub fn enqueue_err(&self, key: K, code: libc::c_int) {
-        self.enqueue(key, Err(Error::from_raw_os_error(code)));
+    pub fn enqueue_io(&self, key: K, result: Result<O, libc::c_int>) {
+        self.enqueue(key, result.map_err(Error::from_raw_os_error));
     }
 }

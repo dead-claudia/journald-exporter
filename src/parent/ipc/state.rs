@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 pub struct ParentIpcDynamic {
     child_user_group: UserGroup,
-    args: Vec<String>,
+    args: Box<[Box<str>]>,
     prom_environment: PromEnvironment,
     key_target: KeyWatcherTarget,
 }
@@ -16,7 +16,7 @@ impl ParentIpcDynamic {
         &self.child_user_group
     }
 
-    pub fn args(&'static self) -> &'static Vec<String> {
+    pub fn args(&'static self) -> &'static [Box<str>] {
         &self.args
     }
 
@@ -70,7 +70,7 @@ impl<M: ParentIpcMethods> ParentIpcState<M> {
     pub fn init_dynamic(
         &'static self,
         child_user_group: UserGroup,
-        args: Vec<String>,
+        args: Box<[Box<str>]>,
         prom_environment: PromEnvironment,
         key_dir: PathBuf,
     ) {

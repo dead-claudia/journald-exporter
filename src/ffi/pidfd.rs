@@ -139,10 +139,9 @@ impl PidFd {
                 libc::CLD_KILLED | libc::CLD_DUMPED => {
                     Ok(ExitResult::Signal(Signal::from_raw(info.si_status())))
                 }
-                _ => Err(string_err(format!(
-                    "Unexpected `si_code` from wait: {}",
-                    info.si_code
-                ))),
+                _ => Err(string_err(
+                    format!("Unexpected `si_code` from wait: {}", info.si_code).into(),
+                )),
             }
         }
     }

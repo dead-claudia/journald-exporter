@@ -9,10 +9,9 @@ use crate::cli::args::parse_args;
 use crate::ffi::normalize_errno;
 use crate::ffi::Signal;
 use crate::parent::start_parent;
-use std::borrow::Cow;
 
-fn eprintln(msg: Cow<str>) {
-    let mut msg = msg.into_owned().into_bytes();
+fn eprintln(msg: CowStr) {
+    let mut msg = msg.into_owned().into_string().into_bytes();
     msg.push(b'\n');
     drop(io::stderr().write_all(&msg));
 }
@@ -63,11 +62,7 @@ impl log::Log for StderrLogger {
 
     fn log(&self, record: &log::Record) {
         // It's okay to print everything to stderr. This doesn't log informative messages anyways.
-        let args = record.args();
-        eprintln(
-            args.as_str()
-                .map_or_else(|| Cow::Owned(args.to_string()), Cow::Borrowed),
-        );
+        eprintln(CowStr::format(*record.args()));
     }
 
     fn flush(&self) {

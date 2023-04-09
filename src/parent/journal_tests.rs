@@ -7,8 +7,6 @@ use crate::ffi::FakeJournalRef;
 use crate::ffi::FakeSystemdProvider;
 use crate::ffi::Id128;
 use crate::parent::ipc::mocks::FakeIpcChildHandle;
-use const_str::cstr;
-use std::ffi::CStr;
 
 struct TestState {
     state: ParentIpcState<FakeIpcChildHandle>,
@@ -39,26 +37,20 @@ impl TestState {
         self.state.state().snapshot()
     }
 
-    fn push_field(&'static self, key: &'static CStr, value: Result<&'static [u8], i32>) {
-        let key = key.to_owned();
-        match value {
-            Ok(result) => self.provider.journal.get_data.enqueue_ok(key, result),
-            Err(code) => self.provider.journal.get_data.enqueue_err(key, code),
-        }
+    #[track_caller]
+    fn push_field(&'static self, key: &'static [u8], value: Result<&'static [u8], i32>) {
+        self.provider
+            .journal
+            .get_data
+            .enqueue_io(FixedCString::new(key), value);
     }
 
     fn push_entry(&'static self, entry: Entry) {
-        static SYSTEMD_UNIT: &CStr = cstr!("_SYSTEMD_UNIT");
-        static PRIORITY: &CStr = cstr!("PRIORITY");
-        static UID: &CStr = cstr!("_UID");
-        static GID: &CStr = cstr!("_GID");
-        static MESSAGE: &CStr = cstr!("MESSAGE");
-
-        self.push_field(SYSTEMD_UNIT, entry.unit);
-        self.push_field(PRIORITY, entry.priority);
-        self.push_field(UID, entry.uid);
-        self.push_field(GID, entry.gid);
-        self.push_field(MESSAGE, entry.message);
+        self.push_field(b"_SYSTEMD_UNIT", entry.unit);
+        self.push_field(b"PRIORITY", entry.priority);
+        self.push_field(b"_UID", entry.uid);
+        self.push_field(b"_GID", entry.gid);
+        self.push_field(b"MESSAGE", entry.message);
     }
 }
 
@@ -67,7 +59,7 @@ fn aborts_on_initial_watchdog_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_err(libc::EIO);
+    T.provider.watchdog_notify.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);
@@ -120,8 +112,8 @@ fn aborts_on_early_fatal_open_failure() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_err(libc::EIO);
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);
@@ -147,12 +139,12 @@ fn aborts_on_early_fatal_set_data_threshold() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
     T.provider
         .journal
         .set_data_threshold
-        .enqueue_err(libc::ENOMEM);
+        .enqueue_io(Err(libc::ENOMEM));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ENOMEM)));
     logger_guard.expect_logs(&[]);
@@ -178,14 +170,14 @@ fn aborts_on_early_fatal_seek() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
     T.provider
         .journal
         .seek_monotonic_usec
-        .enqueue_err(libc::ECHILD);
+        .enqueue_io(Err(libc::ECHILD));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ECHILD)));
     logger_guard.expect_logs(&[]);
@@ -211,12 +203,12 @@ fn retries_on_out_of_descriptors() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_err(libc::EMFILE);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_err(libc::ENFILE);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_err(libc::EIO);
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Err(libc::EMFILE));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Err(libc::ENFILE));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[
@@ -247,20 +239,20 @@ fn retries_on_connection_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::ECONNRESET);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::ECONNRESET));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::ECONNABORTED);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_err(libc::EIO);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::ECONNABORTED));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -295,12 +287,12 @@ fn aborts_on_io_error_during_wait() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);
@@ -330,13 +322,13 @@ fn aborts_on_memory_error_during_next() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_err(libc::ENOMEM);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Err(libc::ENOMEM));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ENOMEM)));
     logger_guard.expect_logs(&[]);
@@ -366,14 +358,14 @@ fn aborts_on_missing_cursor_after_next() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
-    T.provider.journal.cursor.enqueue_err(libc::ENOENT);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
+    T.provider.journal.cursor.enqueue_io(Err(libc::ENOENT));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::ENOENT)));
     logger_guard.expect_logs(&[]);
@@ -403,17 +395,17 @@ fn pushes_entry_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -421,9 +413,9 @@ fn pushes_entry_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"some text"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);
@@ -464,17 +456,17 @@ fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -482,9 +474,9 @@ fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b""),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);
@@ -525,17 +517,17 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Err(libc::ENOENT),
         priority: Ok(b"4"),
@@ -543,11 +535,11 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Err(libc::E2BIG),
         priority: Ok(b"4"),
@@ -555,11 +547,11 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Err(libc::ENOBUFS),
         priority: Ok(b"4"),
@@ -567,11 +559,11 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Err(libc::EBADMSG),
         priority: Ok(b"4"),
@@ -579,9 +571,9 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -617,17 +609,17 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Err(libc::ENOENT),
@@ -635,11 +627,11 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Err(libc::E2BIG),
@@ -647,11 +639,11 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Err(libc::ENOBUFS),
@@ -659,11 +651,11 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         uid: Ok(b"123"),
@@ -671,9 +663,9 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -714,17 +706,17 @@ fn processes_invalid_priority_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"wut"),
@@ -732,9 +724,9 @@ fn processes_invalid_priority_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[
@@ -777,17 +769,17 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -795,11 +787,11 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -807,11 +799,11 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -819,11 +811,11 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -831,9 +823,9 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -874,17 +866,17 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -892,11 +884,11 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -904,11 +896,11 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -916,11 +908,11 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -928,9 +920,9 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -973,17 +965,17 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -991,11 +983,11 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
         gid: Err(libc::ENOENT),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1003,11 +995,11 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
         gid: Err(libc::E2BIG),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1015,11 +1007,11 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
         gid: Err(libc::ENOBUFS),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1027,9 +1019,9 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
         gid: Err(libc::EBADMSG),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -1070,17 +1062,17 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1088,11 +1080,11 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
         gid: Ok(b"wut"),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1100,11 +1092,11 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
         gid: Err(libc::E2BIG),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1112,11 +1104,11 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
         gid: Err(libc::ENOBUFS),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1124,9 +1116,9 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
         gid: Err(libc::EBADMSG),
         message: Ok(b"message"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     T.provider
@@ -1169,17 +1161,17 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 1"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 1")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1187,11 +1179,11 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Err(libc::ENOENT),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 2"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 2")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1199,11 +1191,11 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Err(libc::E2BIG),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 3"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 3")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1211,11 +1203,11 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Err(libc::ENOBUFS),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor 4"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor 4")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1223,9 +1215,9 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Err(libc::EBADMSG),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);
@@ -1266,17 +1258,17 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
 
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.open.enqueue_ok(());
-    T.provider.journal.set_data_threshold.enqueue_ok(());
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.open.enqueue_io(Ok(()));
+    T.provider.journal.set_data_threshold.enqueue_io(Ok(()));
     T.provider.get_monotonic_time_usec.enqueue(123_000_000_000);
-    T.provider.journal.seek_monotonic_usec.enqueue_ok(());
-    T.provider.journal.wait.enqueue_ok(true);
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.seek_monotonic_usec.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Ok(true));
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1284,11 +1276,11 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
         gid: Ok(b"456"),
         message: Ok(b"some text 1"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"4"),
@@ -1296,11 +1288,11 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
         gid: Ok(b"456"),
         message: Ok(b"some text 2"),
     });
-    T.provider.journal.next.enqueue_ok(true);
+    T.provider.journal.next.enqueue_io(Ok(true));
     T.provider
         .journal
         .cursor
-        .enqueue_ok(Cursor::new(b"test cursor"));
+        .enqueue_io(Ok(Cursor::new(b"test cursor")));
     T.push_entry(Entry {
         unit: Ok(b"my-service.service"),
         priority: Ok(b"6"),
@@ -1308,9 +1300,9 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
         gid: Ok(b"123"),
         message: Ok(b"some text 3"),
     });
-    T.provider.journal.next.enqueue_ok(false);
-    T.provider.watchdog_notify.enqueue_ok(());
-    T.provider.journal.wait.enqueue_err(libc::EIO);
+    T.provider.journal.next.enqueue_io(Ok(false));
+    T.provider.watchdog_notify.enqueue_io(Ok(()));
+    T.provider.journal.wait.enqueue_io(Err(libc::EIO));
 
     assert_result_eq(T.start(), Err(Error::from_raw_os_error(libc::EIO)));
     logger_guard.expect_logs(&[]);

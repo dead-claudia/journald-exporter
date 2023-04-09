@@ -8,7 +8,6 @@ use crate::ffi::SystemdProvider;
 #[cfg(not(miri))]
 use const_str::cstr;
 use std::ffi::CStr;
-use std::ffi::CString;
 
 pub struct FakeJournalRef {
     pub set_data_threshold: CallSpy<usize, io::Result<()>>,
@@ -17,7 +16,7 @@ pub struct FakeJournalRef {
     pub wait: CallSpy<Duration, io::Result<bool>>,
     pub next: CallSpy<(), io::Result<bool>>,
     pub cursor: CallSpy<(), io::Result<Cursor>>,
-    pub get_data: CallSpyMap<CString, (), io::Result<&'static [u8]>>,
+    pub get_data: CallSpyMap<FixedCString, (), io::Result<&'static [u8]>>,
 }
 
 impl FakeJournalRef {
@@ -82,7 +81,7 @@ impl JournalRef for &'static FakeJournalRef {
     }
 
     fn get_data<'a>(&'a mut self, field: &CStr) -> io::Result<&'a [u8]> {
-        self.get_data.call(field.to_owned(), ())
+        self.get_data.call(FixedCString::new(field.to_bytes()), ())
     }
 }
 
@@ -162,7 +161,7 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `open`: [Ok(())]"]
     fn fake_systemd_provider_extra_open_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER.assert_no_calls_remaining();
     }
 
@@ -170,8 +169,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `open`: [Ok(())]"]
     fn fake_systemd_provider_extra_open_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_err(libc::EACCES);
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Err(libc::EACCES));
+        PROVIDER.open.enqueue_io(Ok(()));
         let _open_result = <&FakeJournalRef>::open(&PROVIDER);
         PROVIDER.assert_no_calls_remaining();
     }
@@ -179,7 +178,7 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_open_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -187,7 +186,7 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_watchdog_notify_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.watchdog_notify.enqueue_ok(());
+        PROVIDER.watchdog_notify.enqueue_io(Ok(()));
         assert_result_eq(PROVIDER.watchdog_notify(), Ok(()));
         PROVIDER.assert_no_calls_remaining();
     }
@@ -196,7 +195,7 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `watchdog_notify`: [Ok(())]"]
     fn fake_systemd_provider_extra_watchdog_notify_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.watchdog_notify.enqueue_ok(());
+        PROVIDER.watchdog_notify.enqueue_io(Ok(()));
         PROVIDER.assert_no_calls_remaining();
     }
 
@@ -204,8 +203,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `watchdog_notify`: [Ok(())]"]
     fn fake_systemd_provider_extra_watchdog_notify_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.watchdog_notify.enqueue_err(libc::EACCES);
-        PROVIDER.watchdog_notify.enqueue_ok(());
+        PROVIDER.watchdog_notify.enqueue_io(Err(libc::EACCES));
+        PROVIDER.watchdog_notify.enqueue_io(Ok(()));
         assert_result_eq(
             PROVIDER.watchdog_notify(),
             Err(Error::from_raw_os_error(libc::EACCES)),
@@ -248,8 +247,8 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_set_data_threshold_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.set_data_threshold.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.set_data_threshold.enqueue_io(Ok(()));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -264,8 +263,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `set_data_threshold`: [Ok(())]"]
     fn fake_systemd_provider_extra_set_data_threshold_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.set_data_threshold.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.set_data_threshold.enqueue_io(Ok(()));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -274,12 +273,12 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `set_data_threshold`: [Ok(())]"]
     fn fake_systemd_provider_expected_set_data_threshold_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .set_data_threshold
-            .enqueue_err(libc::EACCES);
-        PROVIDER.journal.set_data_threshold.enqueue_ok(());
+            .enqueue_io(Err(libc::EACCES));
+        PROVIDER.journal.set_data_threshold.enqueue_io(Ok(()));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -293,8 +292,8 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_seek_monotonic_usec_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.seek_monotonic_usec.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.seek_monotonic_usec.enqueue_io(Ok(()));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -312,8 +311,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `seek_monotonic_usec`: [Ok(())]"]
     fn fake_systemd_provider_extra_seek_monotonic_usec_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.seek_monotonic_usec.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.seek_monotonic_usec.enqueue_io(Ok(()));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -322,12 +321,12 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `seek_monotonic_usec`: [Ok(())]"]
     fn fake_systemd_provider_expected_seek_monotonic_usec_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .seek_monotonic_usec
-            .enqueue_err(libc::EACCES);
-        PROVIDER.journal.seek_monotonic_usec.enqueue_ok(());
+            .enqueue_io(Err(libc::EACCES));
+        PROVIDER.journal.seek_monotonic_usec.enqueue_io(Ok(()));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -344,8 +343,8 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_seek_cursor_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.seek_cursor.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.seek_cursor.enqueue_io(Ok(()));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -363,8 +362,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `seek_cursor`: [Ok(())]"]
     fn fake_systemd_provider_extra_seek_cursor_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.seek_cursor.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.seek_cursor.enqueue_io(Ok(()));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -373,9 +372,9 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `seek_cursor`: [Ok(())]"]
     fn fake_systemd_provider_expected_seek_cursor_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.seek_cursor.enqueue_err(libc::EACCES);
-        PROVIDER.journal.seek_cursor.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.seek_cursor.enqueue_io(Err(libc::EACCES));
+        PROVIDER.journal.seek_cursor.enqueue_io(Ok(()));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -392,8 +391,8 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_wait_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.wait.enqueue_ok(true);
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.wait.enqueue_io(Ok(true));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -411,8 +410,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `wait`: [Ok(true)]"]
     fn fake_systemd_provider_extra_wait_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.wait.enqueue_ok(true);
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.wait.enqueue_io(Ok(true));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -421,9 +420,9 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `wait`: [Ok(false)]"]
     fn fake_systemd_provider_expected_wait_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.wait.enqueue_ok(true);
-        PROVIDER.journal.wait.enqueue_ok(false);
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.wait.enqueue_io(Ok(true));
+        PROVIDER.journal.wait.enqueue_io(Ok(false));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -440,8 +439,8 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_next_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.next.enqueue_ok(true);
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.next.enqueue_io(Ok(true));
         assert_result_eq(<&FakeJournalRef>::open(&PROVIDER).unwrap().next(), Ok(true));
         PROVIDER.assert_no_calls_remaining();
     }
@@ -450,8 +449,8 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `next`: [Ok(true)]"]
     fn fake_systemd_provider_extra_next_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.next.enqueue_ok(true);
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.next.enqueue_io(Ok(true));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -460,9 +459,9 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `next`: [Ok(false)]"]
     fn fake_systemd_provider_expected_next_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
-        PROVIDER.journal.next.enqueue_ok(true);
-        PROVIDER.journal.next.enqueue_ok(false);
+        PROVIDER.open.enqueue_io(Ok(()));
+        PROVIDER.journal.next.enqueue_io(Ok(true));
+        PROVIDER.journal.next.enqueue_io(Ok(false));
         assert_result_eq(<&FakeJournalRef>::open(&PROVIDER).unwrap().next(), Ok(true));
         PROVIDER.assert_no_calls_remaining();
     }
@@ -470,11 +469,11 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_cursor_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .cursor
-            .enqueue_ok(Cursor::new(b"0123456789"));
+            .enqueue_io(Ok(Cursor::new(b"0123456789")));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER).unwrap().cursor(),
             Ok(Cursor::new(b"0123456789")),
@@ -486,11 +485,11 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `cursor`: [Ok(Cursor(\"0123456789\"))]"]
     fn fake_systemd_provider_extra_cursor_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .cursor
-            .enqueue_ok(Cursor::new(b"0123456789"));
+            .enqueue_io(Ok(Cursor::new(b"0123456789")));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -499,15 +498,15 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `cursor`: [Ok(Cursor(\"9876543210\"))]"]
     fn fake_systemd_provider_expected_cursor_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .cursor
-            .enqueue_ok(Cursor::new(b"0123456789"));
+            .enqueue_io(Ok(Cursor::new(b"0123456789")));
         PROVIDER
             .journal
             .cursor
-            .enqueue_ok(Cursor::new(b"9876543210"));
+            .enqueue_io(Ok(Cursor::new(b"9876543210")));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER).unwrap().cursor(),
             Ok(Cursor::new(b"0123456789")),
@@ -518,11 +517,11 @@ mod tests {
     #[test]
     fn fake_systemd_provider_expected_get_data_call_works() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .get_data
-            .enqueue_err(cstr!("FOO_BAR").to_owned(), libc::EBADMSG);
+            .enqueue_io(FixedCString::new(b"FOO_BAR"), Err(libc::EBADMSG));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()
@@ -537,11 +536,11 @@ mod tests {
     {\"FOO_BAR\": [Err(Os { code: 74, kind: Uncategorized, message: \"Bad message\" })]}"]
     fn fake_systemd_provider_extra_get_data_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .get_data
-            .enqueue_err(cstr!("FOO_BAR").to_owned(), libc::EBADMSG);
+            .enqueue_io(FixedCString::new(b"FOO_BAR"), Err(libc::EBADMSG));
         let _ = <&FakeJournalRef>::open(&PROVIDER).unwrap();
         PROVIDER.assert_no_calls_remaining();
     }
@@ -550,15 +549,15 @@ mod tests {
     #[should_panic = "Unexpected calls remaining for `get_data`: {\"FOO_BAR\": [Ok([1, 2, 3])]}"]
     fn fake_systemd_provider_expected_get_data_call_after_call_is_asserted() {
         static PROVIDER: FakeSystemdProvider = FakeSystemdProvider::new(Id128(0));
-        PROVIDER.open.enqueue_ok(());
+        PROVIDER.open.enqueue_io(Ok(()));
         PROVIDER
             .journal
             .get_data
-            .enqueue_err(cstr!("FOO_BAR").to_owned(), libc::EBADMSG);
+            .enqueue_io(FixedCString::new(b"FOO_BAR"), Err(libc::EBADMSG));
         PROVIDER
             .journal
             .get_data
-            .enqueue_ok(cstr!("FOO_BAR").to_owned(), &[1, 2, 3]);
+            .enqueue_io(FixedCString::new(b"FOO_BAR"), Ok(&[1, 2, 3]));
         assert_result_eq(
             <&FakeJournalRef>::open(&PROVIDER)
                 .unwrap()

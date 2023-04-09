@@ -20,9 +20,14 @@ fn allocation_failure() -> ! {
 
 impl FixedCString {
     #[cfg(test)]
+    // Make stack traces stop at the right spot.
+    #[track_caller]
     pub fn new(value: &[u8]) -> Self {
         if value.contains(&b'\0') {
-            panic!("String data contains a null character.");
+            panic!(
+                "String data contains a null character: {:?}",
+                BinaryToDebug(value)
+            );
         }
 
         // SAFETY: asserts memory is allocated. `value` is verified to not contain nulls.
@@ -104,6 +109,12 @@ impl PartialEq for FixedCString {
 
 impl Eq for FixedCString {}
 
+impl std::hash::Hash for FixedCString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write(self.as_bytes())
+    }
+}
+
 impl Drop for FixedCString {
     fn drop(&mut self) {
         // SAFETY: Only called on drop and just releases memory.
@@ -161,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "String data contains a null character."]
+    #[should_panic = "String data contains a null character: \"01234\\x0056789\""]
     fn from_panics_if_data_contains_zero() {
         FixedCString::new(b"01234\x0056789");
     }

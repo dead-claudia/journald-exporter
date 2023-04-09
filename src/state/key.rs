@@ -27,7 +27,7 @@ impl zeroize::Zeroize for Key {
 
 impl fmt::Debug for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Key(\"{}\")", BinaryToDisplay(self.insecure_get_value()))
+        write!(f, "Key({:?})", BinaryToDebug(self.insecure_get_value()))
     }
 }
 

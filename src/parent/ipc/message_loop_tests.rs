@@ -22,7 +22,7 @@ fn reads_immediate_error() {
     let _watcher_guard = S.state.terminate_notify().create_guard();
     S.init_test_state();
 
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EPIPE));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -43,9 +43,9 @@ fn reads_interrupt_then_immediate_error() {
     let _watcher_guard = S.state.terminate_notify().create_guard();
     S.init_test_state();
 
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -67,15 +67,15 @@ fn read_header_then_empty_request() {
     S.init_test_state();
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -107,17 +107,17 @@ fn read_header_then_request_keys() {
     S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_KEY]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_KEY]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED.len());
+    S.enqueue_child_input(Ok(EXPECTED.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -175,17 +175,17 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state();
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_METRICS]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -243,17 +243,20 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state();
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::TRACK_REQUEST, ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[
+        ipc::child::TRACK_REQUEST,
+        ipc::child::REQUEST_METRICS,
+    ]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -311,18 +314,18 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state();
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::TRACK_REQUEST]);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::TRACK_REQUEST]));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_METRICS]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -380,18 +383,18 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state();
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_ok(&[ipc::child::TRACK_REQUEST]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_METRICS]));
+    S.enqueue_child_output(Ok(&[ipc::child::TRACK_REQUEST]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -458,18 +461,18 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_KEY, ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_KEY, ipc::child::REQUEST_METRICS]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_KEY_SET.len());
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_KEY_SET.len()));
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -536,23 +539,23 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[
         ipc::child::REQUEST_KEY,
         ipc::child::TRACK_REQUEST,
         ipc::child::REQUEST_METRICS,
         ipc::child::TRACK_REQUEST,
-    ]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    ]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_KEY_SET.len());
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_KEY_SET.len()));
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -619,18 +622,18 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_METRICS, ipc::child::REQUEST_KEY]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_METRICS, ipc::child::REQUEST_KEY]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_KEY_SET.len());
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_KEY_SET.len()));
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -697,19 +700,19 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_KEY]);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_KEY]));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_METRICS]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_KEY_SET.len());
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
+    S.enqueue_child_input(Ok(EXPECTED_KEY_SET.len()));
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -776,19 +779,19 @@ journald_messages_ingested_bytes_total 0
     S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_METRICS]);
-    S.enqueue_child_output_ok(&[ipc::child::REQUEST_KEY]);
-    S.enqueue_child_output_err(libc::EINTR);
-    S.enqueue_child_output_err(libc::EAGAIN);
-    S.enqueue_child_output_err(libc::EPIPE);
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_METRICS]));
+    S.enqueue_child_output(Ok(&[ipc::child::REQUEST_KEY]));
+    S.enqueue_child_output(Err(libc::EINTR));
+    S.enqueue_child_output(Err(libc::EAGAIN));
+    S.enqueue_child_output(Err(libc::EPIPE));
 
-    S.enqueue_child_input_ok(EXPECTED_EXPOSITION.len());
-    S.enqueue_child_input_ok(EXPECTED_KEY_SET.len());
+    S.enqueue_child_input(Ok(EXPECTED_EXPOSITION.len()));
+    S.enqueue_child_input(Ok(EXPECTED_KEY_SET.len()));
 
     assert_result_eq(
         S.run_ipc_message_loop(),
@@ -809,7 +812,7 @@ fn bails_on_immediately_disconnected_receiver_when_handling_request_metrics() {
     let _watcher_guard = S.state.terminate_notify().create_guard();
     S.init_test_state();
 
-    S.enqueue_child_output_ok(&ipc::VERSION_BYTES);
+    S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
     S.enqueue_child_output_ok_spy(
         &[ipc::child::REQUEST_METRICS],
         Box::new(|| S.state.done_notify().notify()),

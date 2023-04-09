@@ -1,18 +1,14 @@
 use crate::prelude::*;
 
-pub fn to_hex_pair(byte: u8) -> (u8, u8) {
-    // FIXME: Switch `wrapping_*` calls to literal operators where possible once
-    // https://github.com/rust-lang/rust-clippy/pull/10309 is released.
-
+/// Returns a value such that `result.to_ne_bytes()` returns `[hi, lo]`
+pub fn to_hex_pair(byte: u8) -> [u8; 2] {
     fn to_hex(quad: u8) -> u8 {
-        quad.wrapping_add(if quad < 10 {
-            b'0'
-        } else {
-            b'A'.wrapping_sub(10)
-        })
+        quad.wrapping_add(if quad < 10 { b'0' } else { b'A' - 10 })
     }
 
-    (to_hex(byte.wrapping_shr(4)), to_hex(byte & 0x0F))
+    // FIXME: Switch `wrapping_*` calls to literal operators where possible once
+    // https://github.com/rust-lang/rust-clippy/pull/10309 is released.
+    [to_hex(byte.wrapping_shr(4)), to_hex(byte & 0x0F)]
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -20,49 +16,31 @@ pub struct BinaryToDebug<'a>(pub &'a [u8]);
 
 impl fmt::Debug for BinaryToDebug<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_char('"')?;
-        BinaryToDisplay(self.0).fmt(f)?;
-        f.write_char('"')?;
-        Ok(())
+        let mut result = String::new();
+        result.push('"');
+        binary_to_display(&mut result, self.0);
+        result.push('"');
+        f.write_str(&result)
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub struct BinaryToDisplay<'a>(pub &'a [u8]);
-
-impl fmt::Debug for BinaryToDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0.iter().copied() {
-            let prefix = match byte {
-                b'\t' => 't',
-                b'\r' => 'r',
-                b'\n' => 'n',
-                b'\\' => '\\',
-                b'\'' => '\'',
-                b'"' => '"',
-                b'\x20'..=b'\x7e' => {
-                    f.write_char(byte.into())?;
-                    continue;
-                }
-                _ => {
-                    let (hi, lo) = to_hex_pair(byte);
-                    f.write_char('\\')?;
-                    f.write_char('x')?;
-                    f.write_char(hi.into())?;
-                    f.write_char(lo.into())?;
-                    continue;
-                }
-            };
-            f.write_char('\\')?;
-            f.write_char(prefix)?;
+pub fn binary_to_display(result: &mut String, buf: &[u8]) {
+    for &byte in buf {
+        match byte {
+            b'\t' => result.push_str("\\t"),
+            b'\r' => result.push_str("\\r"),
+            b'\n' => result.push_str("\\n"),
+            b'\\' => result.push_str("\\\\"),
+            b'\'' => result.push_str("\\'"),
+            b'"' => result.push_str("\\\""),
+            b'\x20'..=b'\x7e' => result.push(byte.into()),
+            _ => {
+                let [hi, lo] = to_hex_pair(byte);
+                let chars = [b'\\', b'x', hi, lo];
+                // SAFETY: `chars` is pure ASCII.
+                result.push_str(unsafe { std::str::from_utf8_unchecked(&chars) });
+            }
         }
-        Ok(())
-    }
-}
-
-impl fmt::Display for BinaryToDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self, f)
     }
 }
 
@@ -92,7 +70,7 @@ impl fmt::Debug for DebugBigSlice<'_> {
                 f.write_char(' ')?;
             }
 
-            let (hi, lo) = to_hex_pair(byte);
+            let [hi, lo] = to_hex_pair(byte);
             f.write_char(hi.into())?;
             f.write_char(lo.into())?;
         }
@@ -161,16 +139,15 @@ mod tests {
         for (i, hi) in VALUES {
             for (j, lo) in VALUES {
                 let byte = i << 4 | j;
-                let expected = (hi, lo);
+                let expected = [hi, lo];
                 let actual = to_hex_pair(byte);
 
                 assert_eq!(
                     to_hex_pair(byte),
                     expected,
-                    "to_hex_pair(0x{:02X}) == ({:?}, {:?})",
+                    "to_hex_pair(0x{:02X}) == {:?}",
                     byte,
-                    char::from(actual.0),
-                    char::from(actual.1),
+                    actual.map(char::from),
                 );
             }
         }

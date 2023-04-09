@@ -26,17 +26,17 @@ impl ReadSpy {
         }
     }
 
-    pub fn enqueue_read_ok(&self, result: &'static [u8]) {
-        self.inner.enqueue((Ok(result), None));
-    }
-
     pub fn enqueue_read_ok_spy(&self, result: &'static [u8], spy: Box<dyn FnOnce() + Send>) {
         self.inner.enqueue((Ok(result), Some(SpyFn { f: spy })));
     }
 
-    pub fn enqueue_read_err(&self, code: libc::c_int) {
+    pub fn enqueue_read(&self, result: Result<&'static [u8], libc::c_int>) {
         self.inner
-            .enqueue((Err(Error::from_raw_os_error(code)), None));
+            .enqueue((result.map_err(Error::from_raw_os_error), None));
+    }
+
+    pub fn enqueue_read_err(&self, code: libc::c_int) {
+        self.enqueue_read(Err(code));
     }
 
     #[track_caller]

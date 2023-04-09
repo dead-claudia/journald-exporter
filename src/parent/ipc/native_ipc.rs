@@ -130,7 +130,7 @@ impl ParentIpcMethods for NativeIpcMethods {
 
         let ipc_dynamic = ipc_state.dynamic();
 
-        command.args(ipc_state.dynamic().args());
+        command.args(ipc_state.dynamic().args().iter().map(|arg| &**arg));
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::inherit());

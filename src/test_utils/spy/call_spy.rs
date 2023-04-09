@@ -89,11 +89,7 @@ impl<I, O> CallSpy<I, O> {
 }
 
 impl<I, O> CallSpy<I, io::Result<O>> {
-    pub fn enqueue_ok(&self, result: O) {
-        self.enqueue(Ok(result));
-    }
-
-    pub fn enqueue_err(&self, code: libc::c_int) {
-        self.enqueue(Err(Error::from_raw_os_error(code)));
+    pub fn enqueue_io(&self, result: Result<O, libc::c_int>) {
+        self.enqueue(result.map_err(Error::from_raw_os_error));
     }
 }

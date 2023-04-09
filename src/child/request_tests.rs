@@ -29,7 +29,7 @@ fn test_not_found(
     let shared = make_shared(state, target, &[]);
     let state = Arc::new(SyntheticRequestState::new(route, None));
 
-    target.enqueue_write_ok(1);
+    target.enqueue_write(Ok(1));
 
     handle_request(SyntheticRequestContext(state.clone()), &shared);
 
@@ -82,7 +82,7 @@ fn handles_an_unauthorized_metrics_get_request() {
 
     let state = Arc::new(SyntheticRequestState::new(Route::MetricsGet, None));
 
-    TARGET.enqueue_write_ok(1);
+    TARGET.enqueue_write(Ok(1));
 
     handle_request(SyntheticRequestContext(state.clone()), &shared);
 
@@ -124,7 +124,7 @@ fn test_bad_auth_syntax(
         Some(authorization),
     ));
 
-    target.enqueue_write_ok(1);
+    target.enqueue_write(Ok(1));
 
     handle_request(SyntheticRequestContext(request_state.clone()), &shared);
 
@@ -212,7 +212,7 @@ fn test_bad_auth_credentials(
         Some(authorization),
     ));
 
-    target.enqueue_write_ok(1);
+    target.enqueue_write(Ok(1));
 
     handle_request(SyntheticRequestContext(request_state.clone()), &shared);
 
@@ -302,8 +302,8 @@ fn handles_an_authorized_metrics_get_request() {
     let terminate_notify = Arc::new(Notify::new());
     let _terminate_guard = terminate_notify.create_guard();
 
-    TARGET.enqueue_write_ok(1);
-    TARGET.enqueue_write_ok(1);
+    TARGET.enqueue_write(Ok(1));
+    TARGET.enqueue_write(Ok(1));
 
     // Decoded: `metrics:0123456789abcdef`
     let state = Arc::new(SyntheticRequestState::new(
@@ -357,8 +357,8 @@ fn trims_whitespace_in_metrics_get_request() {
     let terminate_notify = Arc::new(Notify::new());
     let _terminate_guard = terminate_notify.create_guard();
 
-    TARGET.enqueue_write_ok(1);
-    TARGET.enqueue_write_ok(1);
+    TARGET.enqueue_write(Ok(1));
+    TARGET.enqueue_write(Ok(1));
 
     // Decoded: `metrics:0123456789abcdef`
     let state = Arc::new(SyntheticRequestState::new(
@@ -403,7 +403,7 @@ fn handles_metrics_get_request_disconnects_early() {
     let terminate_notify = Arc::new(Notify::new());
     terminate_notify.notify();
 
-    TARGET.enqueue_write_err(libc::EPIPE);
+    TARGET.enqueue_write(Err(libc::EPIPE));
 
     // Decoded: `metrics:0123456789abcdef`
     let state = Arc::new(SyntheticRequestState::new(
@@ -452,8 +452,8 @@ fn handles_metrics_get_request_disconnects_late() {
         Some(b"Basic bWV0cmljczowMTIzNDU2Nzg5YWJjZGVm"),
     ));
 
-    TARGET.enqueue_write_ok(1);
-    TARGET.enqueue_write_ok(1);
+    TARGET.enqueue_write(Ok(1));
+    TARGET.enqueue_write(Ok(1));
 
     handle_request(SyntheticRequestContext(state.clone()), &shared);
 
@@ -503,8 +503,7 @@ fn make_shared(
     *guard = KeySet::new(
         keys.iter()
             .map(|k| Key::from_hex(k).unwrap())
-            .collect::<Vec<_>>()
-            .into(),
+            .collect::<Box<_>>(),
     );
 
     RequestShared {

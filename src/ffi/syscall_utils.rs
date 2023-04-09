@@ -8,7 +8,7 @@ fn syscall_check_fail(syscall_name: &'static str) -> Error {
         e.raw_os_error(),
         Some(libc::ENOSYS | libc::EINVAL | libc::EFAULT)
     ) {
-        super::panic_errno(e, syscall_name);
+        panic!("{}: {}", e, syscall_name);
     }
     e
 }
@@ -19,7 +19,7 @@ fn sd_check_fail(syscall_name: &'static str, result: libc::c_int) -> Error {
     let code = result.wrapping_neg();
     let e = Error::from_raw_os_error(code);
     if matches!(code, libc::ENOSYS | libc::EINVAL | libc::EFAULT) {
-        super::panic_errno(e, syscall_name);
+        panic!("{}: {}", e, syscall_name);
     }
     e
 }
