@@ -216,6 +216,11 @@ function runChildTest() {
         {stdio: ["ignore", "inherit", "pipe"], signal: killCtrl.signal},
     )
 
+    let rl = readline.createInterface({
+        input: child.stderr,
+        crlfDelay: Infinity,
+    })
+
     function terminateHandler() {
         if (terminationAttempted) return
         terminationAttempted = true
@@ -237,11 +242,6 @@ function runChildTest() {
     // No longer needed - cleanup will happen upon termination or error.
     ctrl.signal.removeEventListener("abort", cleanup)
 
-    let rl = readline.createInterface({
-        input: child.stderr,
-        crlfDelay: Infinity,
-    })
-
     rl.on("error", reportAsyncError)
     rl.on("line", onLine)
 
@@ -256,28 +256,55 @@ function runChildTest() {
         fetchLoop(fetchCtrl.signal, terminateHandler)
     }
 
-    function onLine(line) {
-        const exec = /^\s*Running as unit:\s*(\S*\.service)\s*$/.exec(line)
-        if (exec) {
-            unitName = exec[1]
-            console.error(`[INTEG] Detected transient unit name: ${unitName}`)
-
-            // Clear out readline instance
-            rl.off("line", onLine)
-            rl.close()
-            child.stderr.resume()
+    function detachOutput() {
+        // Flush standard error buffer
+        if (stderr) {
+            for (const line of stderr) console.error(line)
             stderr = undefined
+        }
 
-            // Just spawn and forget. It's just for visibility.
-            child_process.spawn(
-                "journalctl",
-                ["--unit", unitName, "--follow", "--output=cat"],
-                {stdio: "inherit", signal: journalctlCtrl.signal}
-            )
-                .on("error", reportAsyncError)
+        // Just spawn and forget. It's just for visibility.
+        child_process.spawn(
+            "journalctl",
+            ["--unit", unitName, "--follow", "--output=cat"],
+            {stdio: "inherit", signal: journalctlCtrl.signal}
+        ).on("error", reportAsyncError)
+    }
 
-            fetchTimer = setTimeout(startFetch, 2000)
+    function checkUnitLive(line) {
+        const exec = /^Running as unit:\s*([A-Za-z0-9@_-]+\.service)\b/.exec(line)
+        if (!exec) return false
+
+        unitName = exec[1]
+        console.error(`[INTEG] Detected transient unit name: ${unitName}`)
+
+        detachOutput()
+        fetchTimer = setTimeout(startFetch, 2000)
+        return true
+    }
+
+    function checkUnitFailed(line) {
+        const exec = /^Job for ([A-Za-z0-9@_-]+\.service) failed because the control process exited with error code$/.exec(line)
+        if (!exec) return false
+
+        unitName = exec[1]
+        console.error(`[INTEG] Unit failed to initialize: ${unitName}`)
+        detachOutput()
+        return true
+    }
+
+    // Just ignore this line
+    function checkUnitFailedDetails(line) {
+        return /^See "systemctl status [A-Za-z0-9@_-]+\.service" and "journalctl -xeu [A-Za-z0-9@_-]+\.service" for details$/.test(line)
+    }
+
+    function onLine(line) {
+        if (!stderr) {
+            console.error(line)
         } else {
+            if (checkUnitLive(line)) return
+            if (checkUnitFailed(line)) return
+            if (checkUnitFailedDetails(line)) return
             stderr.push(line)
         }
     }
@@ -292,6 +319,7 @@ function runChildTest() {
         console.error(`[INTEG] Child exited with code ${code}, signal ${signal}`)
         if (stderr) {
             for (const line of stderr) console.error(line)
+            stderr = undefined
         }
         if (code) {
             process.exitCode = code
