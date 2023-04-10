@@ -216,11 +216,6 @@ function runChildTest() {
         {stdio: ["ignore", "inherit", "pipe"], signal: killCtrl.signal},
     )
 
-    let rl = readline.createInterface({
-        input: child.stderr,
-        crlfDelay: Infinity,
-    })
-
     function terminateUnit() {
         // Don't care about if/when it exits.
         child_process.spawn("systemctl", ["stop", unitName], {stdio: "inherit"})
@@ -239,13 +234,6 @@ function runChildTest() {
         console.error("[INTEG] Child terminate signal sent")
     }
 
-    ctrl.signal.addEventListener("abort", terminateHandler, {once: true})
-    // No longer needed - cleanup will happen upon termination or error.
-    ctrl.signal.removeEventListener("abort", cleanup)
-
-    rl.on("error", reportAsyncError)
-    rl.on("line", onLine)
-
     function startFetch() {
         console.error("[INTEG] Starting fetch loop")
 
@@ -262,6 +250,25 @@ function runChildTest() {
         if (stderr) {
             for (const line of stderr) console.error(line)
             stderr = undefined
+        }
+    }
+
+    function reportExitStatus(code, signal) {
+        if (code) {
+            process.exitCode = code
+        } else if (signal) {
+            process.exitCode = 128 + os.constants.signals[signal]
+        }
+    }
+
+    function runErrorDisplayCommand(cmd, args) {
+        try {
+            const result = child_process.spawnSync(cmd, args, {encoding: "utf-8"})
+            console.error(result.stdout.trimEnd())
+            console.error(result.stderr.trimEnd())
+            reportExitStatus(result.code, result.signal)
+        } catch (e) {
+            reportAsyncError(e)
         }
     }
 
@@ -284,16 +291,13 @@ function runChildTest() {
     function checkUnitFailed(line) {
         const exec = /^Job for ([A-Za-z0-9@_-]+\.service) failed\b/.exec(line)
         if (!exec) return false
-        unitName = exec[1]
-        console.error(`[INTEG] Unit failed to initialize: ${unitName}`)
+        const unit = exec[1]
+        console.error(`[INTEG] Unit failed to initialize: ${unit}`)
         detachOutput()
-        // Just spawn and forget. It's just for visibility.
-        child_process.spawn(
-            "journalctl",
-            ["--unit", unitName, "--catalog", "--output=cat"],
-            {stdio: "inherit", signal: journalctlCtrl.signal}
-        ).on("error", reportAsyncError)
-        terminateUnit()
+        // Print for visibility. Doing it this way makes it much easier to sequence the two error
+        // outputs.
+        runErrorDisplayCommand("journalctl", ["--unit", unit, "--catalog", "--output=cat"])
+        runErrorDisplayCommand("systemctl", ["status", unit])
         return true
     }
 
@@ -322,11 +326,7 @@ function runChildTest() {
     function onExit(code, signal) {
         console.error(`[INTEG] Child exited with code ${code}, signal ${signal}`)
         detachOutput()
-        if (code) {
-            process.exitCode = code
-        } else if (signal) {
-            process.exitCode = 128 + os.constants.signals[signal]
-        }
+        reportExitStatus(code, signal)
         handleTermination()
     }
 
@@ -336,6 +336,18 @@ function runChildTest() {
         child.off("exit", onExit)
         setTimeout(cleanup, 1000);
     }
+
+    ctrl.signal.addEventListener("abort", terminateHandler, {once: true})
+    // No longer needed - cleanup will happen upon termination or error.
+    ctrl.signal.removeEventListener("abort", cleanup)
+
+    const rl = readline.createInterface({
+        input: child.stderr,
+        crlfDelay: Infinity,
+    })
+
+    rl.on("error", reportAsyncError)
+    rl.on("line", onLine)
 
     child.once("error", onError)
     child.once("exit", onExit)
