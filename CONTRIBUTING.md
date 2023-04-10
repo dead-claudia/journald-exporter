@@ -16,6 +16,12 @@ You can find instructions on how to install that [here](https://www.rust-lang.or
 
 ## E2E testing
 
+First, before you run the E2E tests, you'll need to set up a `journald-exporter` system account, or the service will fail to start. No home directory needed.
+
+```sh
+useradd --system --user-group journald-exporter
+```
+
 The end to end tests are written using Node.js. They have been verified to run in fairly recent Node 16.x, but should work in the latest version as well.
 
 Why Node and not a Bash script? Few reasons:

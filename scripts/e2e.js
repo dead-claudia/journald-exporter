@@ -279,7 +279,8 @@ function runChildTest() {
         console.error(`[INTEG] Detected transient unit name: ${unitName}`)
         detachOutput()
         fetchTimer = setTimeout(startFetch, 2000)
-        // Just spawn and forget. It's just for visibility.
+        // Just spawn and forget. It's just for visibility, but it needs to run in parallel in the
+        // background.
         child_process.spawn(
             "journalctl",
             ["--unit", unitName, "--follow", "--output=cat"],
