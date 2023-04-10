@@ -120,7 +120,6 @@ jobs:
           command: ./${{ matrix.binary }} --show-output
           # Usually passes the second try if it flakes the first.
           max_attempts: 3
-        if: success() || cancelled()
 
   miri_tests:
     name: Miri tests
@@ -159,5 +158,5 @@ jobs:
         with:
           name: journald-exporter
       - run: chmod +x journald-exporter
+      - run: useradd --system --user-group journald-exporter
       - run: sudo node ./scripts/e2e.js -b journald-exporter
-        if: success() || cancelled()
