@@ -221,19 +221,20 @@ function runChildTest() {
         crlfDelay: Infinity,
     })
 
+    function terminateUnit() {
+        // Don't care about if/when it exits.
+        child_process.spawn("systemctl", ["stop", unitName], {stdio: "inherit"})
+            .on("error", reportAsyncError)
+    }
+
     function terminateHandler() {
         if (terminationAttempted) return
         terminationAttempted = true
         clearTimeout(fetchTimer)
         safeAbort(fetchCtrl)
 
-        if (unitName) {
-            // Don't care about if/when it exits.
-            child_process.spawn("systemctl", ["stop", unitName], {stdio: "inherit"})
-                .on("error", reportAsyncError)
-        } else {
-            safeAbort(killCtrl)
-        }
+        if (unitName) terminateUnit()
+        else safeAbort(killCtrl)
 
         console.error("[INTEG] Child terminate signal sent")
     }
@@ -262,13 +263,6 @@ function runChildTest() {
             for (const line of stderr) console.error(line)
             stderr = undefined
         }
-
-        // Just spawn and forget. It's just for visibility.
-        child_process.spawn(
-            "journalctl",
-            ["--unit", unitName, "--follow", "--output=cat"],
-            {stdio: "inherit", signal: journalctlCtrl.signal}
-        ).on("error", reportAsyncError)
     }
 
     function checkUnitLive(line) {
@@ -278,15 +272,28 @@ function runChildTest() {
         console.error(`[INTEG] Detected transient unit name: ${unitName}`)
         detachOutput()
         fetchTimer = setTimeout(startFetch, 2000)
+        // Just spawn and forget. It's just for visibility.
+        child_process.spawn(
+            "journalctl",
+            ["--unit", unitName, "--follow", "--output=cat"],
+            {stdio: "inherit", signal: journalctlCtrl.signal}
+        ).on("error", reportAsyncError)
         return true
     }
 
     function checkUnitFailed(line) {
-        const exec = /^Job for ([A-Za-z0-9@_-]+\.service) failed because the control process exited with error code\b/.exec(line)
+        const exec = /^Job for ([A-Za-z0-9@_-]+\.service) failed\b/.exec(line)
         if (!exec) return false
         unitName = exec[1]
         console.error(`[INTEG] Unit failed to initialize: ${unitName}`)
         detachOutput()
+        // Just spawn and forget. It's just for visibility.
+        child_process.spawn(
+            "journalctl",
+            ["--unit", unitName, "--catalog", "--output=cat"],
+            {stdio: "inherit", signal: journalctlCtrl.signal}
+        ).on("error", reportAsyncError)
+        terminateUnit()
         return true
     }
 
@@ -314,10 +321,7 @@ function runChildTest() {
 
     function onExit(code, signal) {
         console.error(`[INTEG] Child exited with code ${code}, signal ${signal}`)
-        if (stderr) {
-            for (const line of stderr) console.error(line)
-            stderr = undefined
-        }
+        detachOutput()
         if (code) {
             process.exitCode = code
         } else if (signal) {
