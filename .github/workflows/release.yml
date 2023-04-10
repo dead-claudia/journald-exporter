@@ -22,6 +22,7 @@ jobs:
       # Needed to create the release
       contents: write
     steps:
+      - uses: actions/checkout@v3
       - name: Download release artifact
         uses: actions/download-artifact@v3
         with:
