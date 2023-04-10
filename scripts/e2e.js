@@ -274,19 +274,16 @@ function runChildTest() {
     function checkUnitLive(line) {
         const exec = /^Running as unit:\s*([A-Za-z0-9@_-]+\.service)\b/.exec(line)
         if (!exec) return false
-
         unitName = exec[1]
         console.error(`[INTEG] Detected transient unit name: ${unitName}`)
-
         detachOutput()
         fetchTimer = setTimeout(startFetch, 2000)
         return true
     }
 
     function checkUnitFailed(line) {
-        const exec = /^Job for ([A-Za-z0-9@_-]+\.service) failed because the control process exited with error code$/.exec(line)
+        const exec = /^Job for ([A-Za-z0-9@_-]+\.service) failed because the control process exited with error code\b/.exec(line)
         if (!exec) return false
-
         unitName = exec[1]
         console.error(`[INTEG] Unit failed to initialize: ${unitName}`)
         detachOutput()
@@ -295,7 +292,7 @@ function runChildTest() {
 
     // Just ignore this line
     function checkUnitFailedDetails(line) {
-        return /^See "systemctl status [A-Za-z0-9@_-]+\.service" and "journalctl -xeu [A-Za-z0-9@_-]+\.service" for details$/.test(line)
+        return /^See "systemctl status[^"]*" and "journalctl[^"]*" for details\b/.test(line)
     }
 
     function onLine(line) {
