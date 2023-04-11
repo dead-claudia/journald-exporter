@@ -17,7 +17,7 @@ const-str = { version = "0.5.4", features = ["std"] }
 
 [dev-dependencies]
 # Simplifies test setup and the `waitid` hack.
-ctor = "0.1.26"
+ctor = "0.2.0"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
 tempfile = "3.4.0"
