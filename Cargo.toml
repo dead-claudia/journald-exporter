@@ -20,7 +20,7 @@ const-str = { version = "0.5.4", features = ["std"] }
 ctor = "0.2.0"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
-tempfile = "3.4.0"
+tempfile = "3.5.0"
 
 [profile.test]
 # 1. Test with release optimization settings (but retain safety checks), for increased test
