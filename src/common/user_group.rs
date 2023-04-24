@@ -71,8 +71,6 @@ pub struct UidGidTable {
 }
 
 impl UidGidTable {
-    /// This is `unsafe` because it's not validated that `user_group_data` is in fact a valid
-    /// serialized sequence of a user table + group table.
     pub const fn new(uid_table: IdTable, gid_table: IdTable) -> UidGidTable {
         UidGidTable {
             uids: uid_table,
