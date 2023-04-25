@@ -1,8 +1,23 @@
-use super::syscall_utils::syscall_check_int;
 use crate::prelude::*;
 
+#[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Signal(u8);
+pub struct Signal(libc::c_int);
+
+// This isn't authoritative. This just represents the max signal number *across all platforms* in
+// Linux. `libc::SIGRTMAX()` is still checked as well in all cases. It's just used so I can
+// pre-populate the signum lookup table.
+
+// Ref: https://elixir.bootlin.com/linux/latest/source/arch/mips/include/uapi/asm/signal.h#L15
+#[cfg(target_arch = "mips")]
+const MAX_SIGNUM: usize = 128;
+
+// All others have this maximum instead.
+#[cfg(not(target_arch = "mips"))]
+const MAX_SIGNUM: usize = 64;
+
+// Not authoritative. Just the first signal reserved for them by POSIX.
+const RT_SIGNUM_START: libc::c_int = 32;
 
 #[cfg(test)]
 impl Arbitrary for Signal {
@@ -24,136 +39,105 @@ impl Arbitrary for Signal {
     }
 }
 
-#[cfg(test)]
 pub fn sigrtmax() -> Signal {
-    let result = libc::SIGRTMAX();
-    if result > zero_extend_u8_i32(u8::MAX) {
-        panic!("Unexpectedly high max real-time signal: {}", result);
-    }
-    Signal(truncate_i32_u8(result))
+    const CAP: libc::c_int = reinterpret_u32_c_int(truncate_usize_u32(MAX_SIGNUM));
+    Signal(libc::SIGRTMAX().max(CAP))
 }
 
 pub fn sigrtmin() -> Signal {
-    if cfg!(miri) {
-        // Hack: expose glibc's normal value for this, since Miri doesn't implement the underlying
-        // libc call. Ref: https://github.com/rust-lang/miri/issues/2832
-        Signal(35)
-    } else {
-        let result = libc::SIGRTMIN();
-        if result > zero_extend_u8_i32(u8::MAX) {
-            panic!("Unexpectedly high min real-time signal: {}", result);
-        }
-        Signal(truncate_i32_u8(result))
-    }
+    Signal(libc::SIGRTMIN().min(RT_SIGNUM_START))
 }
 
 impl Signal {
     // Use only when it's *known* to be a valid signal.
     pub const fn from_raw(signum: i32) -> Signal {
-        Signal(truncate_i32_u8(signum))
+        Signal(signum)
     }
 
     pub const fn as_raw(&self) -> i32 {
-        zero_extend_u8_c_int(self.0)
-    }
-
-    pub fn request_signal_when_parent_terminates(signal: Signal) {
-        if cfg!(miri) {
-            return;
-        }
-
-        // SAFETY: doesn't impact any Rust-visible memory.
-        unsafe {
-            // The only result that could happen in practice is `EINVAL`, which results in a panic.
-            // The condition for this is the signal number being invalid, and no named signal here
-            // should ever trigger that.
-            drop(syscall_check_int(
-                "prctl",
-                libc::prctl(libc::PR_SET_PDEATHSIG, signal.as_raw()),
-            ));
-        }
+        self.0
     }
 
     #[allow(unused)]
-    pub const SIGHUP: Signal = Signal(truncate_i32_u8(libc::SIGHUP));
+    pub const SIGHUP: Signal = Signal(libc::SIGHUP);
     #[allow(unused)]
-    pub const SIGINT: Signal = Signal(truncate_i32_u8(libc::SIGINT));
+    pub const SIGINT: Signal = Signal(libc::SIGINT);
     #[allow(unused)]
-    pub const SIGQUIT: Signal = Signal(truncate_i32_u8(libc::SIGQUIT));
+    pub const SIGQUIT: Signal = Signal(libc::SIGQUIT);
     #[allow(unused)]
-    pub const SIGILL: Signal = Signal(truncate_i32_u8(libc::SIGILL));
+    pub const SIGILL: Signal = Signal(libc::SIGILL);
     #[allow(unused)]
-    pub const SIGTRAP: Signal = Signal(truncate_i32_u8(libc::SIGTRAP));
+    pub const SIGTRAP: Signal = Signal(libc::SIGTRAP);
     #[allow(unused)]
-    pub const SIGABRT: Signal = Signal(truncate_i32_u8(libc::SIGABRT));
+    pub const SIGABRT: Signal = Signal(libc::SIGABRT);
     #[allow(unused)]
-    pub const SIGIOT: Signal = Signal(truncate_i32_u8(libc::SIGIOT));
+    pub const SIGIOT: Signal = Signal(libc::SIGIOT);
     #[allow(unused)]
-    pub const SIGBUS: Signal = Signal(truncate_i32_u8(libc::SIGBUS));
+    pub const SIGBUS: Signal = Signal(libc::SIGBUS);
     #[cfg(target_arch = "mips")]
     #[allow(unused)]
-    pub const SIGEMT: Signal = Signal(truncate_i32_u8(libc::SIGEMT));
+    pub const SIGEMT: Signal = Signal(libc::SIGEMT);
     #[allow(unused)]
-    pub const SIGFPE: Signal = Signal(truncate_i32_u8(libc::SIGFPE));
+    pub const SIGFPE: Signal = Signal(libc::SIGFPE);
     #[allow(unused)]
-    pub const SIGKILL: Signal = Signal(truncate_i32_u8(libc::SIGKILL));
+    pub const SIGKILL: Signal = Signal(libc::SIGKILL);
     #[allow(unused)]
-    pub const SIGUSR1: Signal = Signal(truncate_i32_u8(libc::SIGUSR1));
+    pub const SIGUSR1: Signal = Signal(libc::SIGUSR1);
     #[allow(unused)]
-    pub const SIGSEGV: Signal = Signal(truncate_i32_u8(libc::SIGSEGV));
+    pub const SIGSEGV: Signal = Signal(libc::SIGSEGV);
     #[allow(unused)]
-    pub const SIGUSR2: Signal = Signal(truncate_i32_u8(libc::SIGUSR2));
+    pub const SIGUSR2: Signal = Signal(libc::SIGUSR2);
     #[allow(unused)]
-    pub const SIGPIPE: Signal = Signal(truncate_i32_u8(libc::SIGPIPE));
+    pub const SIGPIPE: Signal = Signal(libc::SIGPIPE);
     #[allow(unused)]
-    pub const SIGALRM: Signal = Signal(truncate_i32_u8(libc::SIGALRM));
+    pub const SIGALRM: Signal = Signal(libc::SIGALRM);
     #[allow(unused)]
-    pub const SIGTERM: Signal = Signal(truncate_i32_u8(libc::SIGTERM));
+    pub const SIGTERM: Signal = Signal(libc::SIGTERM);
     #[allow(unused)]
-    pub const SIGSTKFLT: Signal = Signal(truncate_i32_u8(libc::SIGSTKFLT));
+    pub const SIGSTKFLT: Signal = Signal(libc::SIGSTKFLT);
     #[allow(unused)]
-    pub const SIGCHLD: Signal = Signal(truncate_i32_u8(libc::SIGCHLD));
+    pub const SIGCHLD: Signal = Signal(libc::SIGCHLD);
     #[cfg(target_arch = "mips")]
     #[allow(unused)]
-    pub const SIGCLD: Signal = Signal(truncate_i32_u8(libc::SIGCLD));
+    pub const SIGCLD: Signal = Signal(libc::SIGCLD);
     #[allow(unused)]
-    pub const SIGCONT: Signal = Signal(truncate_i32_u8(libc::SIGCONT));
+    pub const SIGCONT: Signal = Signal(libc::SIGCONT);
     #[allow(unused)]
-    pub const SIGSTOP: Signal = Signal(truncate_i32_u8(libc::SIGSTOP));
+    pub const SIGSTOP: Signal = Signal(libc::SIGSTOP);
     #[allow(unused)]
-    pub const SIGTSTP: Signal = Signal(truncate_i32_u8(libc::SIGTSTP));
+    pub const SIGTSTP: Signal = Signal(libc::SIGTSTP);
     #[allow(unused)]
-    pub const SIGTTIN: Signal = Signal(truncate_i32_u8(libc::SIGTTIN));
+    pub const SIGTTIN: Signal = Signal(libc::SIGTTIN);
     #[allow(unused)]
-    pub const SIGTTOU: Signal = Signal(truncate_i32_u8(libc::SIGTTOU));
+    pub const SIGTTOU: Signal = Signal(libc::SIGTTOU);
     #[allow(unused)]
-    pub const SIGURG: Signal = Signal(truncate_i32_u8(libc::SIGURG));
+    pub const SIGURG: Signal = Signal(libc::SIGURG);
     #[allow(unused)]
-    pub const SIGXCPU: Signal = Signal(truncate_i32_u8(libc::SIGXCPU));
+    pub const SIGXCPU: Signal = Signal(libc::SIGXCPU);
     #[allow(unused)]
-    pub const SIGXFSZ: Signal = Signal(truncate_i32_u8(libc::SIGXFSZ));
+    pub const SIGXFSZ: Signal = Signal(libc::SIGXFSZ);
     #[allow(unused)]
-    pub const SIGVTALRM: Signal = Signal(truncate_i32_u8(libc::SIGVTALRM));
+    pub const SIGVTALRM: Signal = Signal(libc::SIGVTALRM);
     #[allow(unused)]
-    pub const SIGPROF: Signal = Signal(truncate_i32_u8(libc::SIGPROF));
+    pub const SIGPROF: Signal = Signal(libc::SIGPROF);
     #[allow(unused)]
-    pub const SIGWINCH: Signal = Signal(truncate_i32_u8(libc::SIGWINCH));
+    pub const SIGWINCH: Signal = Signal(libc::SIGWINCH);
     #[allow(unused)]
-    pub const SIGIO: Signal = Signal(truncate_i32_u8(libc::SIGIO));
+    pub const SIGIO: Signal = Signal(libc::SIGIO);
     #[allow(unused)]
-    pub const SIGPOLL: Signal = Signal(truncate_i32_u8(libc::SIGPOLL));
+    pub const SIGPOLL: Signal = Signal(libc::SIGPOLL);
     #[allow(unused)]
-    pub const SIGPWR: Signal = Signal(truncate_i32_u8(libc::SIGPWR));
+    pub const SIGPWR: Signal = Signal(libc::SIGPWR);
     // Not actually defined in the `libc` crate.
     // #[allow(unused)]
-    // pub const SIGINFO: Signal = Signal(truncate_i32_u8(libc::SIGINFO));
+    // pub const SIGINFO: Signal = Signal(libc::SIGINFO);
     // #[allow(unused)]
-    // pub const SIGLOST: Signal = Signal(truncate_i32_u8(libc::SIGLOST));
+    // pub const SIGLOST: Signal = Signal(libc::SIGLOST);
     #[allow(unused)]
-    pub const SIGSYS: Signal = Signal(truncate_i32_u8(libc::SIGSYS));
+    pub const SIGSYS: Signal = Signal(libc::SIGSYS);
     // Deprecated alias of `SIGSYS`
     // #[allow(unused)]
-    // pub const SIGUNUSED: Signal = Signal(truncate_i32_u8(libc::SIGUNUSED));
+    // pub const SIGUNUSED: Signal = Signal(libc::SIGUNUSED);
 
     #[cfg(test)]
     pub fn rt_signals() -> impl Iterator<Item = Signal> {
@@ -209,66 +193,113 @@ impl Signal {
     }
 }
 
+static SIGNAL_NAME_STRINGS: [[u8; 11]; MAX_SIGNUM + 1] = {
+    let mut result = [[0; 11]; MAX_SIGNUM + 1];
+
+    let mut i = 0;
+    while i <= MAX_SIGNUM {
+        let mut current = *b"SIGRTMIN+00";
+        let mut rt_signum =
+            reinterpret_usize_isize(i).wrapping_sub(sign_extend_c_int_isize(RT_SIGNUM_START));
+
+        if rt_signum < 0 {
+            rt_signum = -rt_signum;
+            current[8] = b'-';
+        }
+        let rt_signum = truncate_usize_u8(reinterpret_isize_usize(rt_signum));
+
+        if rt_signum < 10 {
+            current[9] = rt_signum + b'0';
+            current[10] = 0;
+        } else {
+            current[9] = (rt_signum / 10) + b'0';
+            current[10] = (rt_signum % 10) + b'0';
+        }
+
+        result[i] = current;
+        i += 1;
+    }
+
+    // Commented-out entries aren't defined by `libc`.
+    // result[zero_extend_c_int_usize(libc::SIGUNUSED)] = *b"SIGUNUSED\0\0";
+    result[zero_extend_c_int_usize(libc::SIGSYS)] = *b"SIGSYS\0\0\0\0\0";
+    // result[zero_extend_c_int_usize(libc::SIGLOST)] = *b"SIGLOST\0\0\0\0";
+    // result[zero_extend_c_int_usize(libc::SIGINFO)] = *b"SIGINFO\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGPWR)] = *b"SIGPWR\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGPOLL)] = *b"SIGPOLL\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGIO)] = *b"SIGIO\0\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGWINCH)] = *b"SIGWINCH\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGPROF)] = *b"SIGPROF\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGVTALRM)] = *b"SIGVTALRM\0\0";
+    result[zero_extend_c_int_usize(libc::SIGXFSZ)] = *b"SIGXFSZ\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGXCPU)] = *b"SIGXCPU\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGURG)] = *b"SIGURG\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGTTOU)] = *b"SIGTTOU\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGTTIN)] = *b"SIGTTIN\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGTSTP)] = *b"SIGTSTP\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGSTOP)] = *b"SIGSTOP\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGCONT)] = *b"SIGCONT\0\0\0\0";
+    #[cfg(target_arch = "mips")]
+    let _ = result[zero_extend_c_int_usize(libc::SIGCLD)] = *b"SIGCLD\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGCHLD)] = *b"SIGCHLD\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGSTKFLT)] = *b"SIGSTKFLT\0\0";
+    result[zero_extend_c_int_usize(libc::SIGTERM)] = *b"SIGTERM\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGALRM)] = *b"SIGALRM\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGPIPE)] = *b"SIGPIPE\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGUSR2)] = *b"SIGUSR2\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGSEGV)] = *b"SIGSEGV\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGUSR1)] = *b"SIGUSR1\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGKILL)] = *b"SIGKILL\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGFPE)] = *b"SIGFPE\0\0\0\0\0";
+    #[cfg(target_arch = "mips")]
+    let _ = result[zero_extend_c_int_usize(libc::SIGEMT)] = *b"SIGEMT\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGBUS)] = *b"SIGBUS\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGIOT)] = *b"SIGIOT\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGABRT)] = *b"SIGABRT\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGTRAP)] = *b"SIGTRAP\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGILL)] = *b"SIGILL\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGQUIT)] = *b"SIGQUIT\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGINT)] = *b"SIGINT\0\0\0\0\0";
+    result[zero_extend_c_int_usize(libc::SIGHUP)] = *b"SIGHUP\0\0\0\0\0";
+
+    result
+};
+
+static SIGNAL_NAMES: [&str; MAX_SIGNUM + 1] = {
+    let mut result = [""; MAX_SIGNUM + 1];
+    let mut i = 0;
+    while i <= MAX_SIGNUM {
+        let mut current: &[u8] = &SIGNAL_NAME_STRINGS[i];
+        while let [head @ .., 0] = current {
+            current = head;
+        }
+        // SAFETY: The string is known to be valid UTF-8. The `from_raw_parts` is to work
+        // around the fact array slicing isn't available in `const` contexts.
+        result[i] = match std::str::from_utf8(current) {
+            Ok(s) => s,
+            Err(_) => panic!("Invalid UTF-8 detected."),
+        };
+        i += 1;
+    }
+    result
+};
+
 impl fmt::Display for Signal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // It's okay if some of them are unreachable, as signal numbers differ across architectures
-        // and are sometimes aliased.
-        #![allow(unreachable_patterns)]
-
-        let (prefix, offset) = match *self {
-            Signal::SIGHUP => ("SIGHUP", None),
-            Signal::SIGINT => ("SIGINT", None),
-            Signal::SIGQUIT => ("SIGQUIT", None),
-            Signal::SIGILL => ("SIGILL", None),
-            Signal::SIGTRAP => ("SIGTRAP", None),
-            Signal::SIGABRT => ("SIGABRT", None),
-            Signal::SIGIOT => ("SIGIOT", None),
-            Signal::SIGBUS => ("SIGBUS", None),
-            #[cfg(target_arch = "mips")]
-            Signal::SIGEMT => ("SIGEMT", None),
-            Signal::SIGFPE => ("SIGFPE", None),
-            Signal::SIGKILL => ("SIGKILL", None),
-            Signal::SIGUSR1 => ("SIGUSR1", None),
-            Signal::SIGSEGV => ("SIGSEGV", None),
-            Signal::SIGUSR2 => ("SIGUSR2", None),
-            Signal::SIGPIPE => ("SIGPIPE", None),
-            Signal::SIGALRM => ("SIGALRM", None),
-            Signal::SIGTERM => ("SIGTERM", None),
-            Signal::SIGSTKFLT => ("SIGSTKFLT", None),
-            Signal::SIGCHLD => ("SIGCHLD", None),
-            #[cfg(target_arch = "mips")]
-            Signal::SIGCLD => ("SIGCLD", None),
-            Signal::SIGCONT => ("SIGCONT", None),
-            Signal::SIGSTOP => ("SIGSTOP", None),
-            Signal::SIGTSTP => ("SIGTSTP", None),
-            Signal::SIGTTIN => ("SIGTTIN", None),
-            Signal::SIGTTOU => ("SIGTTOU", None),
-            Signal::SIGURG => ("SIGURG", None),
-            Signal::SIGXCPU => ("SIGXCPU", None),
-            Signal::SIGXFSZ => ("SIGXFSZ", None),
-            Signal::SIGVTALRM => ("SIGVTALRM", None),
-            Signal::SIGPROF => ("SIGPROF", None),
-            Signal::SIGWINCH => ("SIGWINCH", None),
-            Signal::SIGIO => ("SIGIO", None),
-            Signal::SIGPOLL => ("SIGPOLL", None),
-            Signal::SIGPWR => ("SIGPWR", None),
-            // Signal::SIGINFO => ("SIGINFO", None),
-            // Signal::SIGLOST => ("SIGLOST", None),
-            Signal::SIGSYS => ("SIGSYS", None),
-            // Signal::SIGUNUSED => ("SIGUNUSED", None),
-            Signal(inner) => {
-                let (offset, is_negative) =
-                    zero_extend_u8_i32(inner).overflowing_sub(sigrtmin().0.into());
-
-                (
-                    if is_negative { "SIGRTMIN" } else { "SIGRTMIN+" },
-                    Some(offset),
-                )
+        if self.0 <= sigrtmax().0 {
+            let mut signum = self.0;
+            if signum >= RT_SIGNUM_START {
+                signum = signum.wrapping_sub(sigrtmin().0.wrapping_sub(RT_SIGNUM_START));
             }
-        };
+            if let Some(name) = SIGNAL_NAMES.get(zero_extend_c_int_usize(signum)) {
+                // SAFETY: All strings are supposed to be valid UTF-8.
+                return f.write_str(name);
+            }
+        }
 
-        f.write_str(prefix)?;
-        offset.map_or(Ok(()), |o| o.fmt(f))
+        f.write_str("unknown (")?;
+        self.0.fmt(f)?;
+        f.write_char(')')
     }
 }
 

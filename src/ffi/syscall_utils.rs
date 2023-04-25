@@ -1,4 +1,11 @@
+use super::panic_errno;
 use crate::prelude::*;
+
+#[cold]
+#[inline(never)]
+fn syscall_assert_fail(syscall_name: &'static str) -> ! {
+    panic_errno(Error::last_os_error(), syscall_name);
+}
 
 #[cold]
 #[inline(never)]
@@ -8,7 +15,7 @@ fn syscall_check_fail(syscall_name: &'static str) -> Error {
         e.raw_os_error(),
         Some(libc::ENOSYS | libc::EINVAL | libc::EFAULT)
     ) {
-        panic!("{}: {}", e, syscall_name);
+        panic_errno(e, syscall_name);
     }
     e
 }
@@ -19,9 +26,17 @@ fn sd_check_fail(syscall_name: &'static str, result: libc::c_int) -> Error {
     let code = result.wrapping_neg();
     let e = Error::from_raw_os_error(code);
     if matches!(code, libc::ENOSYS | libc::EINVAL | libc::EFAULT) {
-        panic!("{}: {}", e, syscall_name);
+        panic_errno(e, syscall_name);
     }
     e
+}
+
+pub fn syscall_assert_int(syscall_name: &'static str, result: libc::c_int) -> libc::c_int {
+    if result >= 0 {
+        result
+    } else {
+        syscall_assert_fail(syscall_name)
+    }
 }
 
 pub fn syscall_check_int(

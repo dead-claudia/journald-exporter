@@ -24,8 +24,8 @@ impl Notify {
         NotifyGuard(self)
     }
 
-    pub fn notify(&self) {
-        self.notified.store(true, Ordering::Release);
+    pub fn notify(&self) -> bool {
+        self.notified.swap(true, Ordering::Release)
     }
 }
 

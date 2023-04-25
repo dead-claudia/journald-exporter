@@ -10,10 +10,6 @@ pub const fn zero_extend_u8_i32(value: u8) -> i32 {
     value as i32
 }
 
-pub const fn zero_extend_u8_c_int(value: u8) -> i32 {
-    value as i32
-}
-
 pub const fn zero_extend_u8_u32(value: u8) -> u32 {
     value as u32
 }
@@ -30,8 +26,16 @@ pub const fn zero_extend_u32_usize(value: u32) -> usize {
     value as usize
 }
 
+pub const fn zero_extend_c_int_usize(value: libc::c_int) -> usize {
+    value as usize
+}
+
 pub const fn zero_extend_usize_u64(value: usize) -> u64 {
     value as u64
+}
+
+pub const fn sign_extend_c_int_isize(value: libc::c_int) -> isize {
+    value as isize
 }
 
 pub const fn reinterpret_i32_c_uint(value: i32) -> libc::c_uint {
@@ -48,6 +52,10 @@ pub const fn reinterpret_u32_i32(value: u32) -> i32 {
 
 pub const fn reinterpret_i32_u32(value: i32) -> u32 {
     value as u32
+}
+
+pub const fn reinterpret_u32_c_int(value: u32) -> libc::c_int {
+    value as libc::c_int
 }
 
 pub const fn reinterpret_usize_isize(value: usize) -> isize {

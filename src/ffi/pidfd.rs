@@ -3,10 +3,7 @@ use crate::prelude::*;
 use super::syscall_utils::syscall_check_long;
 use super::ExitResult;
 use super::Signal;
-use super::SignalAction;
-use super::SignalHandler;
-use super::SignalSet;
-use crate::ffi::panic_errno;
+use crate::ffi::install_handler;
 use crate::ffi::syscall_utils::syscall_check_int;
 use crate::ffi::ExitCode;
 use crate::ffi::PollFlags;
@@ -93,24 +90,8 @@ impl PidFd {
             zombies.
             */
 
-            struct NoopHandler;
-            impl SignalHandler for NoopHandler {
-                fn on_signal(_: Signal) {
-                    // do nothing
-                }
-            }
-
-            let action = SignalAction::new::<NoopHandler>(SignalSet::empty());
-
-            if let Err(e) = action.install(Signal::SIGCHLD) {
-                panic_errno(e, "sigaction")
-            }
-
-            let signal_set = SignalSet::from_iter([Signal::SIGCHLD]);
-
-            if let Err(e) = SignalSet::set_blocked(&signal_set) {
-                panic_errno(e, "sigprocmask")
-            };
+            extern "C" fn noop_handler(_: Signal) {}
+            install_handler(&[Signal::SIGCHLD], 0, noop_handler);
         });
 
         // Per the man page, polling `in` is what's needed to poll for child exit.
