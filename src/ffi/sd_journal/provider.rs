@@ -4,7 +4,7 @@ use super::Id128;
 use super::SystemdMonotonicUsec;
 use super::SystemdProvider;
 use crate::ffi::syscall_utils::sd_check;
-use crate::ffi::syscall_utils::syscall_check_int;
+use crate::ffi::syscall_utils::syscall_assert_int;
 use const_str::cstr;
 use libsystemd_sys::daemon;
 use std::ffi::CStr;
@@ -36,15 +36,9 @@ impl SystemdProvider for NativeSystemdProvider {
         };
 
         // SAFETY: it's only passed in valid addresses, and the result is asserted.
-        if let Err(e) = syscall_check_int("clock_gettime", unsafe {
+        syscall_assert_int("clock_gettime", unsafe {
             libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut timespec)
-        }) {
-            // This should never happen absent an OS bug.
-            panic!(
-                "Failed to get current time due to error: {}",
-                normalize_errno(e, None),
-            );
-        }
+        });
 
         let seconds = Wrapping(reinterpret_i64_u64(timespec.tv_sec));
         let nanos = Wrapping(reinterpret_i64_u64(timespec.tv_nsec));

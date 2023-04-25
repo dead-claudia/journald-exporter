@@ -9,16 +9,20 @@ use crate::ffi::ExitCode;
 use crate::ffi::ExitResult;
 use std::net::Ipv4Addr;
 
+// This shouldn't be seeing very many requests. If this many concurrent requests are occurring,
+// it's clearly a sign that *way* too many requests are being sent.
+const PENDING_REQUEST_CAPACITY: usize = 256;
+
 static SERVER_STATE: ServerState<TinyHttpRequestContext> = ServerState::new();
-static NOTIFY_EXIT: Notify = Notify::new();
+static REQUEST_CHANNEL: Channel<TinyHttpRequestContext, PENDING_REQUEST_CAPACITY> = Channel::new();
 
 pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
     // Set the standard input and output to non-blocking mode so reads will correctly not block.
-    set_non_blocking(libc::STDIN_FILENO)?;
-    set_non_blocking(libc::STDOUT_FILENO)?;
+    set_non_blocking(libc::STDIN_FILENO);
+    set_non_blocking(libc::STDOUT_FILENO);
 
     // Set up all the state.
-    let notify_guard = NOTIFY_EXIT.create_guard();
+    let channel_guard = REQUEST_CHANNEL.close_guard();
 
     let shared = RequestShared {
         state: &SERVER_STATE,
@@ -49,14 +53,12 @@ pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
         WriteOutputRequestResult::Err(e) => return Err(e),
     }
 
-    let (ctx_send, ctx_recv) = make_channel();
-
     // Spawn all the threads
-    let handle_request_handle = ThreadHandle::spawn(handle_request_task(ctx_recv, shared));
-    let server_recv_handle = ThreadHandle::spawn(server_recv_task(server, ctx_send));
+    let handle_request_handle = ThreadHandle::spawn(handle_request_task(shared));
+    let server_recv_handle = ThreadHandle::spawn(server_recv_task(server));
 
-    let child_ipc_result = child_ipc(&SERVER_STATE, io::stdin(), &NOTIFY_EXIT);
-    drop(notify_guard);
+    let child_ipc_result = child_ipc(&SERVER_STATE, io::stdin(), REQUEST_CHANNEL.close_notify());
+    drop(channel_guard);
 
     // Wait for everything else to settle
     let handle_request_result = handle_request_handle.join();
@@ -69,18 +71,14 @@ pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
     Ok(ExitResult::Code(ExitCode(1)))
 }
 
-fn server_recv_task(
-    server: tiny_http::Server,
-    ctx_send: ChannelSender<TinyHttpRequestContext>,
-) -> ThreadTask {
+fn server_recv_task(server: tiny_http::Server) -> ThreadTask {
     Box::new(move || {
-        let _guard = NOTIFY_EXIT.create_guard();
+        let _guard = REQUEST_CHANNEL.close_guard();
 
-        while !NOTIFY_EXIT.has_notified() {
+        while !REQUEST_CHANNEL.has_closed() {
             if let Some(request) = server.recv_timeout(Duration::from_secs(1))? {
-                let ctx = TinyHttpRequestContext::new(request);
-                if matches!(ctx_send.send(ctx), SendResult::Disconnected(_)) {
-                    break;
+                if let Err(ctx) = REQUEST_CHANNEL.send(TinyHttpRequestContext::new(request)) {
+                    ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
                 }
             }
         }
@@ -90,14 +88,13 @@ fn server_recv_task(
 }
 
 fn handle_request_task(
-    ctx_recv: ChannelReceiver<TinyHttpRequestContext>,
     shared: RequestShared<TinyHttpRequestContext, std::io::Stdout>,
 ) -> ThreadTask {
     Box::new(move || {
-        let _guard = NOTIFY_EXIT.create_guard();
+        let _guard = REQUEST_CHANNEL.close_guard();
         let mut target = 1;
 
-        while !NOTIFY_EXIT.has_notified() {
+        while !REQUEST_CHANNEL.has_closed() {
             let mut duration = Instant::now().saturating_duration_since(shared.initialized);
             if duration.as_secs() >= target {
                 target = duration.as_secs().wrapping_add(1);
@@ -105,14 +102,11 @@ fn handle_request_task(
                 SERVER_STATE.limiter.lock().reap(target);
             }
 
-            match ctx_recv.read_timeout(duration) {
-                ReadTimeoutResult::Received(requests) => {
-                    for ctx in requests {
-                        handle_request(ctx, &shared);
-                    }
+            if let Some(requests) = REQUEST_CHANNEL.read_timeout(duration) {
+                // Why `into_vec`? See https://github.com/rust-lang/rust/issues/59878
+                for ctx in requests {
+                    handle_request(ctx, &shared);
                 }
-                ReadTimeoutResult::TimedOut => {}
-                ReadTimeoutResult::Disconnected => break,
             }
         }
 

@@ -7,6 +7,7 @@ use super::args::Args;
 use crate::child::start_child;
 use crate::cli::args::parse_args;
 use crate::ffi::normalize_errno;
+use crate::ffi::request_signal_when_parent_terminates;
 use crate::ffi::Signal;
 use crate::parent::start_parent;
 
@@ -20,7 +21,7 @@ pub fn main() {
     // Kill this if the parent dies, and do it for both the parent and child processes. Easier than
     // trying to wire up the parent somehow while testing. Should also ensure this dies when its
     // parent dies, for the E2E tests (and in general when run via `systemd-run`).
-    Signal::request_signal_when_parent_terminates(Signal::SIGTERM);
+    request_signal_when_parent_terminates(Signal::SIGTERM);
 
     // Wire up the logger that's used everywhere to just print everything to stdout/stderr.
     log::set_max_level(log::LevelFilter::Trace);

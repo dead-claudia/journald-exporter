@@ -1,20 +1,19 @@
 use crate::prelude::*;
 
-use super::syscall_utils::syscall_check_int;
+use super::syscall_utils::syscall_assert_int;
 use std::os::fd::RawFd;
 
-#[cold]
-pub fn set_non_blocking(fd: RawFd) -> io::Result<()> {
+// It's okay for this to panic. It's only used in the child setup code.
+pub fn set_non_blocking(fd: RawFd) {
     assert_not_miri();
 
     // SAFETY: FFI call, called with correct parameters and doesn't modify program-internal state.
     unsafe {
-        let result = syscall_check_int("fcntl", libc::fcntl(fd, libc::F_GETFL))?;
+        let result = syscall_assert_int("fcntl", libc::fcntl(fd, libc::F_GETFL));
         // SAFETY: FFI call, called with correct parameters and doesn't modify program-internal state.
-        syscall_check_int(
+        syscall_assert_int(
             "fcntl",
             libc::fcntl(fd, libc::F_SETFL, result | libc::O_NONBLOCK),
-        )?;
+        );
     }
-    Ok(())
 }

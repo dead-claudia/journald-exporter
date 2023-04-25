@@ -815,7 +815,9 @@ fn bails_on_immediately_disconnected_receiver_when_handling_request_metrics() {
     S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
     S.enqueue_child_output_ok_spy(
         &[ipc::child::REQUEST_METRICS],
-        Box::new(|| S.state.done_notify().notify()),
+        Box::new(|| {
+            S.state.done_notify().notify();
+        }),
     );
 
     let _stdin_lease = S.connect_stdin();
