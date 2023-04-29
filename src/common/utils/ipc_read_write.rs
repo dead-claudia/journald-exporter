@@ -3,18 +3,11 @@ use crate::prelude::*;
 use crate::ffi::PollFlags;
 use crate::ffi::Pollable;
 
-#[must_use]
-pub enum ReadWriteResult<T> {
-    Success(T),
-    Terminated,
-    Err(Error),
-}
-
 pub fn try_read<'a>(
     mut input: impl Pollable + Read,
     done_notify: &Notify,
     read_buf: &'a mut [u8],
-) -> ReadWriteResult<&'a [u8]> {
+) -> io::Result<Option<&'a [u8]>> {
     let mut should_read = true;
 
     'outer: while !done_notify.has_notified() {
@@ -22,7 +15,7 @@ pub fn try_read<'a>(
             if should_read {
                 match input.read(read_buf) {
                     Ok(0) => continue 'outer,
-                    Ok(bytes_read) => return ReadWriteResult::Success(&read_buf[..bytes_read]),
+                    Ok(bytes_read) => return Ok(Some(&read_buf[..bytes_read])),
                     Err(e) => e,
                 }
             } else {
@@ -42,50 +35,11 @@ pub fn try_read<'a>(
             ErrorKind::TimedOut => {}
             // Retry this after a poll
             ErrorKind::WouldBlock => should_read = false,
-            _ => return ReadWriteResult::Err(e),
+            _ => return Err(e),
         }
     }
 
-    ReadWriteResult::Terminated
-}
-
-pub fn try_read2<'a>(
-    mut input: impl Pollable + Read,
-    done_notify: &Notify,
-    read_buf: &'a mut [u8],
-) -> ReadWriteResult<&'a [u8]> {
-    let mut should_read = true;
-
-    'outer: while !done_notify.has_notified() {
-        let e = {
-            if should_read {
-                match input.read(read_buf) {
-                    Ok(0) => continue 'outer,
-                    Ok(bytes_read) => return ReadWriteResult::Success(&read_buf[..bytes_read]),
-                    Err(e) => e,
-                }
-            } else {
-                match input.poll(PollFlags::IN, Some(Duration::from_secs(1))) {
-                    Ok(result) => {
-                        should_read = result.has_in() | result.has_err();
-                        continue 'outer;
-                    }
-                    Err(e) => e,
-                }
-            }
-        };
-
-        match e.kind() {
-            // Retry these immediately.
-            ErrorKind::Interrupted => {}
-            ErrorKind::TimedOut => {}
-            // Retry this after a poll
-            ErrorKind::WouldBlock => should_read = false,
-            _ => return ReadWriteResult::Err(e),
-        }
-    }
-
-    ReadWriteResult::Terminated
+    Ok(None)
 }
 
 #[must_use]

@@ -34,20 +34,20 @@ pub enum ArgsError {
 }
 
 impl ArgsError {
-    pub fn as_str(&self) -> CowStr<'static> {
+    pub fn as_str(&self) -> Cow<'static, str> {
         match self {
-            ArgsError::ShowHelp => CowStr::Borrowed(super::help::HELP_STRING),
-            ArgsError::ShowVersion => CowStr::Borrowed(super::help::VERSION_STRING),
-            ArgsError::MissingPort => CowStr::Borrowed("A port is required."),
-            ArgsError::InvalidPort => CowStr::Borrowed("Port is invalid."),
-            ArgsError::MissingKeyDir => CowStr::Borrowed("Key directory missing."),
-            ArgsError::EmptyKeyDir => CowStr::Borrowed("Key directory cannot be empty."),
+            ArgsError::ShowHelp => Cow::Borrowed(super::help::HELP_STRING),
+            ArgsError::ShowVersion => Cow::Borrowed(super::help::VERSION_STRING),
+            ArgsError::MissingPort => Cow::Borrowed("A port is required."),
+            ArgsError::InvalidPort => Cow::Borrowed("Port is invalid."),
+            ArgsError::MissingKeyDir => Cow::Borrowed("Key directory missing."),
+            ArgsError::EmptyKeyDir => Cow::Borrowed("Key directory cannot be empty."),
             ArgsError::UnknownFlag(option) => {
                 let mut result = String::new();
                 result.push_str("Unknown flag or option: '");
                 binary_to_display(&mut result, option.as_bytes());
                 result.push('\'');
-                CowStr::Owned(result.into())
+                Cow::Owned(result)
             }
         }
     }

@@ -42,16 +42,26 @@ struct UserGroupTableCacheEntry {
     last_updated: SystemTime,
 }
 
+const USER_GROUP_READ_SIZE: usize = 4096;
+
+struct UserGroupTableCache {
+    entry: Option<UserGroupTableCacheEntry>,
+    buf: [u8; USER_GROUP_READ_SIZE],
+}
+
 pub struct NativeIpcMethods {
     child_state: Mutex<Option<PidFd>>,
-    user_group_table_cache: Uncontended<Option<UserGroupTableCacheEntry>>,
+    user_group_table_cache: Uncontended<UserGroupTableCache>,
 }
 
 impl NativeIpcMethods {
     pub const fn new() -> NativeIpcMethods {
         NativeIpcMethods {
             child_state: Mutex::new(None),
-            user_group_table_cache: Uncontended::new(None),
+            user_group_table_cache: Uncontended::new(UserGroupTableCache {
+                entry: None,
+                buf: [0; 4096],
+            }),
         }
     }
 }
@@ -69,29 +79,24 @@ impl ParentIpcMethods for NativeIpcMethods {
         // batch).
         const USER_GROUP_REFRESH_RATE: Duration = Duration::from_secs(600);
 
-        // let mut file = std::fs::File::open(file)?;
-        // let mut result = Vec::new();
-        // io::copy(&mut file, &mut result)?;
-        // Ok(result)
-
         // This should only be called single-threaded. It's okay to hold the lock for an extended
         // period of time.
         let mut guard = self.user_group_table_cache.lock();
 
-        if let Some(entry) = &*guard {
+        if let Some(entry) = &guard.entry {
             if Instant::now() < entry.expiry {
                 return Ok(entry.table.clone());
             }
         }
 
-        let mut uid_file = std::fs::File::open("/etc/passwd")?;
-        let mut gid_file = std::fs::File::open("/etc/group")?;
+        let uid_file = std::fs::File::open("/etc/passwd")?;
+        let gid_file = std::fs::File::open("/etc/group")?;
 
         let uid_updated = uid_file.metadata()?.modified()?;
         let gid_updated = gid_file.metadata()?.modified()?;
         let last_updated = uid_updated.max(gid_updated);
 
-        if let Some(entry) = &mut *guard {
+        if let Some(entry) = &mut guard.entry {
             if last_updated == entry.last_updated {
                 entry.last_updated = last_updated;
                 entry.expiry = Instant::now() + USER_GROUP_REFRESH_RATE;
@@ -99,17 +104,26 @@ impl ParentIpcMethods for NativeIpcMethods {
             }
         }
 
-        let mut result = Vec::with_capacity(4096);
-        io::copy(&mut uid_file, &mut result)?;
-        let uid_table = parse_etc_passwd_etc_group(&result);
+        fn read_file(mut file: std::fs::File, buf: &mut [u8]) -> io::Result<IdTable> {
+            let mut result = Vec::new();
+            loop {
+                let len = file.read(buf)?;
+                if len == 0 {
+                    break;
+                }
+                if !write_slices(&mut result, &[&buf[..len]]) {
+                    return Err(Error::from_raw_os_error(libc::ENOMEM));
+                }
+            }
+            Ok(parse_etc_passwd_etc_group(&result))
+        }
 
-        result.clear();
-        io::copy(&mut gid_file, &mut result)?;
-        let gid_table = parse_etc_passwd_etc_group(&result);
+        let uid_table = read_file(uid_file, &mut guard.buf)?;
+        let gid_table = read_file(gid_file, &mut guard.buf)?;
 
         let table = Arc::new(UidGidTable::new(uid_table, gid_table));
 
-        *guard = Some(UserGroupTableCacheEntry {
+        guard.entry = Some(UserGroupTableCacheEntry {
             table: table.clone(),
             expiry: Instant::now() + USER_GROUP_REFRESH_RATE,
             last_updated,
@@ -179,19 +193,20 @@ impl ParentIpcMethods for NativeIpcMethods {
             .take()
             .expect("No child spawned.");
 
-        let wait_result = pidfd.wait();
+        let mut status = IpcExitStatus {
+            result: None,
+            parent_error: None,
+            child_wait_error: None,
+        };
 
-        let mut result = None;
-        let mut errors = Vec::new();
-
-        match wait_result {
-            Ok(r) => result = Some(r),
+        match pidfd.wait() {
+            Ok(r) => status.result = Some(r),
             // If the child's already terminated (`ESRCH`), that's the desired end state, so no need to
             // complain about that. Other errors are worth complaining about.
             Err(e) if e.raw_os_error() == Some(libc::ESRCH) => {}
-            Err(e) => errors.push(IpcError::ChildWait(e)),
+            Err(e) => status.child_wait_error = Some(e),
         }
 
-        IpcExitStatus { result, errors }
+        status
     }
 }

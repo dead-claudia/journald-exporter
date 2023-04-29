@@ -9,8 +9,8 @@ fn empty_buffer_produces_no_messages() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: None,
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::None,
         }
     );
 }
@@ -42,8 +42,8 @@ fn empty_buffer_post_split_version_produces_no_messages() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: None,
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::None,
         }
     );
 }

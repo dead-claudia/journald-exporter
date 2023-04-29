@@ -5,9 +5,12 @@ use super::request::RequestShared;
 use super::request::ResponseHead;
 use super::request::ServerState;
 use super::request::RESPONSE_OK_METRICS;
+use super::request::RESPONSE_SERVER_ERROR;
 use super::request::RESPONSE_UNAVAILABLE;
+use super::PENDING_REQUEST_CAPACITY;
 use crate::ffi::ImmutableWrite;
 use crate::ffi::Pollable;
+use crate::state::ipc::parent::ResponseItem;
 
 fn read_request(
     state: &ServerState<impl RequestContext>,
@@ -39,13 +42,35 @@ fn resume_queued_requests(
     }
 }
 
-fn handle_key_response(state: &ServerState<impl RequestContext>, keys: Box<[Key]>) {
-    let mut guard = state.key_set.write().unwrap_or_else(|e| e.into_inner());
-    *guard = KeySet::new(keys);
+fn handle_key_set_response(
+    state: &ServerState<impl RequestContext>,
+    response: ResponseItem<KeySet>,
+) {
+    match response {
+        ResponseItem::None => {}
+        ResponseItem::AllocationFailed => {
+            log::error!("Child key set response allocation failed. Retaining current keys.");
+        }
+        ResponseItem::Some(keys) => {
+            *state.key_set.write().unwrap_or_else(|e| e.into_inner()) = keys;
+        }
+    }
 }
 
-fn handle_metrics_snapshot(state: &ServerState<impl RequestContext>, body: Box<[u8]>) {
-    resume_queued_requests(state, &RESPONSE_OK_METRICS, &body);
+fn handle_metrics_response(
+    state: &ServerState<impl RequestContext>,
+    response: ResponseItem<Box<[u8]>>,
+) {
+    match response {
+        ResponseItem::None => {}
+        ResponseItem::AllocationFailed => {
+            log::error!("Child metrics response allocation failed.");
+            resume_queued_requests(state, &RESPONSE_SERVER_ERROR, &[]);
+        }
+        ResponseItem::Some(snapshot) => {
+            resume_queued_requests(state, &RESPONSE_OK_METRICS, &snapshot);
+        }
+    }
 }
 
 pub fn child_ipc(
@@ -56,20 +81,11 @@ pub fn child_ipc(
     // Use a decently read large buffer. Stack space is cheap.
     let mut read_buf = [0_u8; 65536];
 
-    loop {
-        let response = match try_read(&mut input, terminate_notify, &mut read_buf) {
-            ReadWriteResult::Success(buf) => read_request(state, buf),
-            ReadWriteResult::Terminated => break,
-            ReadWriteResult::Err(e) => return Err(e),
-        };
+    while let Some(buf) = try_read(&mut input, terminate_notify, &mut read_buf)? {
+        let response = read_request(state, buf);
 
-        if let Some(keys) = response.key_set {
-            handle_key_response(state, keys)
-        }
-
-        if let Some(snapshot) = response.metrics {
-            handle_metrics_snapshot(state, snapshot);
-        }
+        handle_key_set_response(state, response.key_set);
+        handle_metrics_response(state, response.metrics);
     }
 
     resume_queued_requests(state, &RESPONSE_UNAVAILABLE, &[]);
@@ -77,13 +93,13 @@ pub fn child_ipc(
 }
 
 pub struct IPCRequester<C> {
-    pending_requests: Mutex<Vec<C>>,
+    pending_requests: Mutex<heapless::Vec<C, PENDING_REQUEST_CAPACITY>>,
 }
 
 impl<C: RequestContext> IPCRequester<C> {
     pub const fn new() -> Self {
         Self {
-            pending_requests: Mutex::new(Vec::new()),
+            pending_requests: Mutex::new(heapless::Vec::new()),
         }
     }
 
@@ -112,12 +128,19 @@ pub fn request_metrics<C: RequestContext + 'static>(
     let pending_requests = &shared.state.ipc_requester.pending_requests;
     let mut guard = pending_requests.lock().unwrap_or_else(|e| e.into_inner());
     let is_first = guard.is_empty();
-    guard.push(ctx);
+    let result = guard.push(ctx);
 
     // Don't retain the lock longer than necessary.
     drop(guard);
 
-    if is_first && !send_msg(shared, &[ipc::child::REQUEST_METRICS]) {
-        resume_queued_requests(shared.state, &RESPONSE_UNAVAILABLE, &[]);
+    match result {
+        Ok(()) => {
+            if is_first && !send_msg(shared, &[ipc::child::REQUEST_METRICS]) {
+                resume_queued_requests(shared.state, &RESPONSE_UNAVAILABLE, &[]);
+            }
+        }
+        Err(ctx) => {
+            ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
+        }
     }
 }

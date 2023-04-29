@@ -127,7 +127,7 @@ struct Writer {
 }
 
 impl Writer {
-    fn new() -> Self {
+    fn new() -> Option<Self> {
         /*
         Start with a decently large capacity of 80 KiB to avoid spammy early reallocation. It's
         still likely to reallocate once or twice after that if there's enough services. It sounds
@@ -152,10 +152,10 @@ impl Writer {
         That comes out to a little over 1 KiB per service, or just shy of 60 KiB total. 80 KiB
         gives some breathing room.
         */
-        Self {
-            result: Vec::with_capacity(80 * 1024),
+        Some(Self {
+            result: try_new_dynamic_vec(80 * 1024)?,
             value_buffer: [0; MAX_USIZE_ASCII_BYTES],
-        }
+        })
     }
 
     fn write_global_counter(
@@ -163,7 +163,7 @@ impl Writer {
         constants: &'static GlobalCounterConstants,
         environment: &PromEnvironment,
         value: u64,
-    ) {
+    ) -> bool {
         let head = write_u64(&mut self.value_buffer, value);
 
         write_slices(
@@ -174,7 +174,7 @@ impl Writer {
                 constants.total_label,
                 &self.value_buffer[head..],
             ],
-        );
+        )
     }
 
     fn write_message_counters(
@@ -183,8 +183,8 @@ impl Writer {
         environment: &PromEnvironment,
         snapshot: &ByteCountSnapshot,
         table: &UidGidTable,
-    ) {
-        if snapshot.data.is_empty() {
+    ) -> bool {
+        if snapshot.is_empty() {
             // Don't break sum
             write_slices(
                 &mut self.result,
@@ -193,11 +193,13 @@ impl Writer {
                     environment.created_bytes(),
                     constants.empty_fallback_total,
                 ],
-            );
+            )
         } else {
-            self.result.extend_from_slice(constants.header);
+            if !write_slices(&mut self.result, &[constants.header]) {
+                return false;
+            }
 
-            for data in snapshot.data.iter() {
+            snapshot.each_while(|priority, data| {
                 let head = write_u64(
                     &mut self.value_buffer,
                     match constants.kind {
@@ -207,11 +209,10 @@ impl Writer {
                 );
 
                 let service_bytes = data.key.service().map(|s| s.as_bytes()).unwrap_or(b"?");
-                let priority = data.key.priority;
                 let priority_name = priority.as_name_bytes();
                 let priority_severity = [priority.as_severity_byte()];
-                let user_name = data_bytes_from_id(&table.uids, &data.key.table_key.uid);
-                let group_name = data_bytes_from_id(&table.gids, &data.key.table_key.gid);
+                let user_name = data_bytes_from_id(&table.uids, &data.key.uid);
+                let group_name = data_bytes_from_id(&table.gids, &data.key.gid);
 
                 write_slices(
                     &mut self.result,
@@ -243,8 +244,8 @@ impl Writer {
                         b"\"} ",
                         &self.value_buffer[head..],
                     ],
-                );
-            }
+                )
+            })
         }
     }
 }
@@ -272,8 +273,8 @@ pub fn render_openapi_metrics(
     environment: &PromEnvironment,
     snapshot: &PromSnapshot,
     table: &UidGidTable,
-) -> Box<[u8]> {
-    let mut writer = Writer::new();
+) -> Option<Vec<u8>> {
+    let mut writer = Writer::new()?;
 
     // This macro hackery literally makes this reasonable.
     macro_rules! counter_header {
@@ -319,7 +320,9 @@ pub fn render_openapi_metrics(
                 ),
                 total_label: concat_bytes!(b"\n", NAME, "_total "),
             };
-            writer.write_global_counter(&CONSTANTS, environment, snapshot.$key);
+            if !writer.write_global_counter(&CONSTANTS, environment, snapshot.$key) {
+                return None;
+            }
         }};
     }
 
@@ -341,7 +344,9 @@ pub fn render_openapi_metrics(
                 created_prefix: concat_bytes!("\n", NAME, "_created{service=\""),
                 total_prefix: concat_bytes!("\n", NAME, "_total{service=\""),
             };
-            writer.write_message_counters(&CONSTANTS, environment, &snapshot.messages_ingested, table);
+            if !writer.write_message_counters(&CONSTANTS, environment, &snapshot.messages_ingested, table) {
+                return None;
+            }
         }};
     }
 
@@ -405,7 +410,11 @@ pub fn render_openapi_metrics(
         help: b"Total number of `MESSAGE` field bytes ingested.",
     }
 
-    write_slices(&mut writer.result, &[b"\n# EOF\n"]);
+    if !write_slices(&mut writer.result, &[b"\n# EOF\n"]) {
+        return None;
+    }
 
-    ipc::parent::finish_response_metrics(writer.result)
+    ipc::parent::finish_response_metrics(&mut writer.result);
+
+    Some(writer.result)
 }

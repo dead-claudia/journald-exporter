@@ -53,7 +53,7 @@ fn check_parent_uid_gid() -> io::Result<()> {
     // Verify it's running as root and then get the UID and GID of the child.
 
     if current_uid() != ROOT_UID || current_gid() != ROOT_GID {
-        return Err(err("This program is intended to be run as root."));
+        return Err(error!("This program is intended to be run as root."));
     }
 
     set_euid(ROOT_UID)?;
@@ -67,7 +67,7 @@ fn get_child_uid_gid() -> io::Result<UserGroup> {
         .methods()
         .get_user_group_table()?
         .lookup_user_group(b"journald-exporter", b"journald-exporter")
-        .ok_or_else(|| err("Expected a `journald-exporter` user must be present."))
+        .ok_or_else(|| error!("Expected a `journald-exporter` user must be present."))
 }
 
 // Here's the intent:
@@ -211,7 +211,7 @@ fn spawn_ipc_and_wait_for_child_exit(child_output: std::process::ChildStdout) ->
     drop(done_guard);
 
     if let Err(e) = ipc_thread.join() {
-        status.errors.push(IpcError::Parent(e));
+        status.parent_error = Some(e);
     }
 
     status

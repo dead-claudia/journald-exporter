@@ -95,6 +95,11 @@ pub static RESPONSE_NOT_FOUND: ResponseHead = ResponseHead {
     header_template: ResponseHeaderTemplate::Empty,
 };
 
+pub static RESPONSE_SERVER_ERROR: ResponseHead = ResponseHead {
+    status: 500,
+    header_template: ResponseHeaderTemplate::Empty,
+};
+
 pub static RESPONSE_UNAVAILABLE: ResponseHead = ResponseHead {
     status: 503,
     header_template: ResponseHeaderTemplate::Disconnect,

@@ -30,21 +30,27 @@ pub fn write_to_child_input(s: &'static ParentIpcState<impl ParentIpcMethods>, b
     result
 }
 
-#[must_use]
-fn handle_metrics_request(s: &'static ParentIpcState<impl ParentIpcMethods>) -> bool {
-    let response: Box<[u8]> = match s.methods().get_user_group_table() {
-        Err(e) => {
-            log::error!("{}", normalize_errno(e, None));
-            Box::new([])
+fn try_handle_metrics_request(
+    s: &'static ParentIpcState<impl ParentIpcMethods>,
+) -> io::Result<Vec<u8>> {
+    let table = s.methods().get_user_group_table()?;
+    if let Some(snapshot) = s.state().snapshot() {
+        let environment = s.dynamic().prom_environment();
+        if let Some(result) = render_openapi_metrics(environment, &snapshot, &table) {
+            return Ok(result);
         }
-        Ok(table) => render_openapi_metrics(
-            s.dynamic().prom_environment(),
-            &s.state().snapshot(),
-            &table,
-        ),
     };
 
-    write_to_child_input(s, &response)
+    Err(Error::from_raw_os_error(libc::ENOMEM))
+}
+
+#[must_use]
+fn handle_metrics_request(s: &'static ParentIpcState<impl ParentIpcMethods>) -> bool {
+    let result = try_handle_metrics_request(s).unwrap_or_else(|e| {
+        log::error!("{}", normalize_errno(e, None));
+        Vec::new()
+    });
+    write_to_child_input(s, &result)
 }
 
 pub fn ipc_message_loop<M: ParentIpcMethods>(
@@ -56,12 +62,8 @@ pub fn ipc_message_loop<M: ParentIpcMethods>(
     // only going to be 1-2 bytes to read total.
     let mut read_buf = [0_u8; 4];
 
-    loop {
-        let request = match try_read2(&mut child_output, s.done_notify(), &mut read_buf) {
-            ReadWriteResult::Success(buf) => read_request(s, buf),
-            ReadWriteResult::Terminated => break,
-            ReadWriteResult::Err(e) => return Err(e),
-        };
+    while let Some(buf) = try_read(&mut child_output, s.done_notify(), &mut read_buf)? {
+        let request = read_request(s, buf);
 
         // This is done sequentially, as it in practice is only hit up to about once a minute.
         s.state()

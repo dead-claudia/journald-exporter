@@ -3,15 +3,12 @@ use crate::prelude::*;
 use super::ipc::*;
 use super::request::*;
 use super::server::TinyHttpRequestContext;
+use super::PENDING_REQUEST_CAPACITY;
 use crate::cli::args::ChildArgs;
 use crate::ffi::set_non_blocking;
 use crate::ffi::ExitCode;
 use crate::ffi::ExitResult;
 use std::net::Ipv4Addr;
-
-// This shouldn't be seeing very many requests. If this many concurrent requests are occurring,
-// it's clearly a sign that *way* too many requests are being sent.
-const PENDING_REQUEST_CAPACITY: usize = 256;
 
 static SERVER_STATE: ServerState<TinyHttpRequestContext> = ServerState::new();
 static REQUEST_CHANNEL: Channel<TinyHttpRequestContext, PENDING_REQUEST_CAPACITY> = Channel::new();
@@ -103,8 +100,7 @@ fn handle_request_task(
             }
 
             if let Some(requests) = REQUEST_CHANNEL.read_timeout(duration) {
-                // Why `into_vec`? See https://github.com/rust-lang/rust/issues/59878
-                for ctx in requests {
+                for ctx in requests.into_iter() {
                     handle_request(ctx, &shared);
                 }
             }

@@ -67,23 +67,24 @@ pub fn write_current_key_set(s: &'static ParentIpcState<impl ParentIpcMethods>) 
 
 fn to_io_error(error: notify::Error) -> Error {
     let (result, e) = match error.kind {
-        notify::ErrorKind::Generic(v) => (CowStr::Owned(v.into()), None),
-        notify::ErrorKind::Io(e) => (CowStr::Owned(e.to_string().into()), Some(e)),
-        notify::ErrorKind::PathNotFound => (CowStr::Borrowed("No path was found."), None),
-        notify::ErrorKind::WatchNotFound => (CowStr::Borrowed("No watch was found"), None),
-        notify::ErrorKind::InvalidConfig(_) => {
-            (CowStr::Borrowed("BUG: Invalid configuration"), None)
-        }
-        notify::ErrorKind::MaxFilesWatch => (CowStr::Borrowed("OS file watch limit reached"), None),
+        notify::ErrorKind::Generic(v) => (Cow::Owned(v), None),
+        notify::ErrorKind::Io(e) => (Cow::Owned(e.to_string()), Some(e)),
+        notify::ErrorKind::PathNotFound => (Cow::Borrowed("No path was found."), None),
+        notify::ErrorKind::WatchNotFound => (Cow::Borrowed("No watch was found"), None),
+        notify::ErrorKind::InvalidConfig(_) => (Cow::Borrowed("BUG: Invalid configuration"), None),
+        notify::ErrorKind::MaxFilesWatch => (Cow::Borrowed("OS file watch limit reached"), None),
     };
 
     let (last, initial) = match (e, error.paths.split_last()) {
         (_, Some(v)) => v,
         (Some(e), None) => return e,
-        (None, None) => return cow_err(result),
+        (None, None) => match result {
+            Cow::Borrowed(msg) => return Error::new(ErrorKind::Other, msg),
+            Cow::Owned(msg) => return Error::new(ErrorKind::Other, msg),
+        },
     };
 
-    let mut result = result.into_owned().into_string();
+    let mut result = result.into_owned();
 
     result.push_str(" about ");
 
@@ -104,7 +105,7 @@ fn to_io_error(error: notify::Error) -> Error {
 
     binary_to_display(&mut result, last.as_os_str().as_bytes());
 
-    string_err(result.into())
+    Error::new(ErrorKind::Other, result)
 }
 
 // Assert not writable by group or other, and not readable by group.
@@ -159,13 +160,11 @@ fn resolve_file_name(entry: std::fs::DirEntry) -> std::path::PathBuf {
 
 #[cold]
 fn report_insecure(path: &std::path::Path, metadata: std::fs::Metadata) -> Error {
-    string_err(
-        format!(
-            "{} has insecure permissions: {}",
-            path.display(),
-            insecure_message(metadata),
-        )
-        .into(),
+    error!(
+        ErrorKind::InvalidData,
+        "{} has insecure permissions: {}",
+        path.display(),
+        insecure_message(metadata),
     )
 }
 
@@ -173,20 +172,20 @@ fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
     let metadata = entry.metadata()?;
 
     if !metadata.file_type().is_file() {
-        return Err(string_err(
-            format!("{} is not a file", resolve_file_name(entry).display()).into(),
+        return Err(error!(
+            ErrorKind::InvalidInput,
+            "{} is not a file",
+            resolve_file_name(entry).display()
         ));
     }
 
     // Make polymorphic based on the current user. Easier to clean up that way in test, and in prod
     // it always checks against the root user anyways.
     if metadata.uid() != current_uid() {
-        return Err(string_err(
-            format!(
-                "{} is not owned by the root user",
-                resolve_file_name(entry).display()
-            )
-            .into(),
+        return Err(error!(
+            ErrorKind::InvalidData,
+            "{} is not owned by the root user",
+            resolve_file_name(entry).display()
         ));
     }
 
@@ -200,12 +199,10 @@ fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
 
     let key_data = std::fs::read_to_string(entry.path())?;
     Key::from_hex(key_data.trim().as_bytes()).ok_or_else(|| {
-        string_err(
-            format!(
-                "{} does not contain a valid key",
-                resolve_file_name(entry).display()
-            )
-            .into(),
+        error!(
+            ErrorKind::InvalidData,
+            "{} does not contain a valid key",
+            resolve_file_name(entry).display()
         )
     })
 }

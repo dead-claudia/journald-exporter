@@ -97,6 +97,7 @@ fn panic_invalid_length(len: usize) -> ! {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct KeySet {
     key_set: Option<zeroize::Zeroizing<Box<[Key]>>>,
 }
@@ -115,6 +116,11 @@ impl KeySet {
                 Some(zeroize::Zeroizing::new(b))
             },
         }
+    }
+
+    #[cfg(test)]
+    pub fn build(keys: impl IntoIterator<Item = Key>) -> KeySet {
+        Self::new(keys.into_iter().collect())
     }
 
     pub fn into_insecure_view_keys(self) -> zeroize::Zeroizing<Box<[Key]>> {
@@ -180,85 +186,85 @@ mod tests {
 
     #[test]
     fn rejects_non_hex_keys_with_even_length() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"abcdef0123456789").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
         assert!(!key_set.check_key(b"definitely a non-hex string with even length"));
     }
 
     #[test]
     fn rejects_non_hex_keys_with_odd_length() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"abcdef0123456789").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
         assert!(!key_set.check_key(b"definitely a non-hex string with odd length"));
     }
 
     #[test]
     fn rejects_hex_keys_with_odd_length() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"abcdef0123456789").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
         assert!(!key_set.check_key(b"0123456789abcdef1"));
     }
 
     #[test]
     fn checks_hex_lower_against_single_hex_lower_match() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"0123456789abcdef").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"0123456789abcdef").unwrap()]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_hex_lower_against_single_hex_upper_match() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"0123456789ABCDEF").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"0123456789ABCDEF").unwrap()]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_hex_upper_against_single_hex_lower_match() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"0123456789abcdef").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"0123456789abcdef").unwrap()]);
         assert!(key_set.check_key(b"0123456789ABCDEF"));
     }
 
     #[test]
     fn checks_hex_upper_against_single_hex_upper_match() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"0123456789ABCDEF").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"0123456789ABCDEF").unwrap()]);
         assert!(key_set.check_key(b"0123456789ABCDEF"));
     }
 
     #[test]
     fn rejects_against_single_mismatch() {
-        let key_set = KeySet::new(Box::new([Key::from_hex(b"abcdef0123456789").unwrap()]));
+        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
         assert!(!key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_against_multi_match_one() {
-        let key_set = KeySet::new(Box::new([
+        let key_set = KeySet::build([
             Key::from_hex(b"0123456789abcdef").unwrap(),
             Key::from_hex(b"aaaaaaaaaaaaaaaa").unwrap(),
-        ]));
+        ]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_against_multi_match_second() {
-        let key_set = KeySet::new(Box::new([
+        let key_set = KeySet::build([
             Key::from_hex(b"aaaaaaaaaaaaaaaa").unwrap(),
             Key::from_hex(b"0123456789abcdef").unwrap(),
-        ]));
+        ]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_against_multi_match_all() {
-        let key_set = KeySet::new(Box::new([
+        let key_set = KeySet::build([
             Key::from_hex(b"0123456789abcdef").unwrap(),
             Key::from_hex(b"0123456789abcdef").unwrap(),
-        ]));
+        ]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn rejects_against_multi_match_none() {
-        let key_set = KeySet::new(Box::new([
+        let key_set = KeySet::build([
             Key::from_hex(b"abcdef0123456789").unwrap(),
             Key::from_hex(b"aaaaaaaaaaaaaaaa").unwrap(),
-        ]));
+        ]);
         assert!(!key_set.check_key(b"0123456789abcdef"));
     }
 }

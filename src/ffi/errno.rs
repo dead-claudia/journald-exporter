@@ -1,12 +1,12 @@
 use crate::prelude::*;
 
 #[cold]
-fn format_non_errno(e: Error) -> CowStr<'static> {
-    CowStr::Owned(e.to_string().into())
+fn format_non_errno(e: Error) -> Cow<'static, str> {
+    Cow::Owned(e.to_string())
 }
 
 #[cold]
-fn format_unknown_errno(errno: libc::c_int) -> Box<str> {
+fn format_unknown_errno(errno: libc::c_int) -> String {
     let mut s = String::new();
     s.push_str("EUNKNOWN: Unknown errno ");
     let mut errno = reinterpret_i32_u32(errno);
@@ -15,161 +15,177 @@ fn format_unknown_errno(errno: libc::c_int) -> Box<str> {
         errno /= 10;
     }
     s.push(char::from_digit(errno, 10).unwrap());
-    s.into()
+    s
 }
 
-fn format_errno(errno: libc::c_int) -> CowStr<'static> {
+pub fn normalize_errno(e: Error, syscall: Option<&'static str>) -> Cow<'static, str> {
     // It's okay if some of them are unreachable, as errno numbers differ across architectures
     // and are sometimes aliased.
-    #![allow(unreachable_patterns)]
+    #[allow(unreachable_patterns)]
+    let result = match e.raw_os_error() {
+        // List taken from glibc, but with stuff not supported by Rust dropped.
+        // IMPORTANT: Keep in sync with `arbitrary_errno`. Ideally, this would use a proc macro or
+        // script, but I'm too lazy to do that for such a one-off thing that doesn't change often in
+        // practice.
+        Some(libc::E2BIG) => Cow::Borrowed("E2BIG: Argument list too long"),
+        Some(libc::EACCES) => Cow::Borrowed("EACCES: Permission denied"),
+        Some(libc::EADDRINUSE) => Cow::Borrowed("EADDRINUSE: Address already in use"),
+        Some(libc::EADDRNOTAVAIL) => {
+            Cow::Borrowed("EADDRNOTAVAIL: Cannot assign requested address")
+        }
+        Some(libc::EADV) => Cow::Borrowed("EADV: Advertise error"),
+        Some(libc::EAFNOSUPPORT) => {
+            Cow::Borrowed("EAFNOSUPPORT: Address family not supported by protocol")
+        }
+        Some(libc::EAGAIN) => Cow::Borrowed("EAGAIN: Resource temporarily unavailable"),
+        Some(libc::EALREADY) => Cow::Borrowed("EALREADY: Operation already in progress"),
+        Some(libc::EBADE) => Cow::Borrowed("EBADE: Invalid exchange"),
+        Some(libc::EBADF) => Cow::Borrowed("EBADF: Bad file descriptor"),
+        Some(libc::EBADFD) => Cow::Borrowed("EBADFD: File descriptor in bad state"),
+        Some(libc::EBADMSG) => Cow::Borrowed("EBADMSG: Bad message"),
+        Some(libc::EBADR) => Cow::Borrowed("EBADR: Invalid request descriptor"),
+        Some(libc::EBADRQC) => Cow::Borrowed("EBADRQC: Invalid request code"),
+        Some(libc::EBADSLT) => Cow::Borrowed("EBADSLT: Invalid slot"),
+        Some(libc::EBFONT) => Cow::Borrowed("EBFONT: Bad font file format"),
+        Some(libc::EBUSY) => Cow::Borrowed("EBUSY: Device or resource busy"),
+        Some(libc::ECANCELED) => Cow::Borrowed("ECANCELED: Operation canceled"),
+        Some(libc::ECHILD) => Cow::Borrowed("ECHILD: No child processes"),
+        Some(libc::ECHRNG) => Cow::Borrowed("ECHRNG: Channel number out of range"),
+        Some(libc::ECOMM) => Cow::Borrowed("ECOMM: Communication error on send"),
+        Some(libc::ECONNABORTED) => Cow::Borrowed("ECONNABORTED: Software caused connection abort"),
+        Some(libc::ECONNREFUSED) => Cow::Borrowed("ECONNREFUSED: Connection refused"),
+        Some(libc::ECONNRESET) => Cow::Borrowed("ECONNRESET: Connection reset by peer"),
+        Some(libc::EDEADLK) => Cow::Borrowed("EDEADLK: Resource deadlock avoided"),
+        Some(libc::EDESTADDRREQ) => Cow::Borrowed("EDESTADDRREQ: Destination address required"),
+        Some(libc::EDOM) => Cow::Borrowed("EDOM: Numerical argument out of domain"),
+        Some(libc::EDOTDOT) => Cow::Borrowed("EDOTDOT: RFS specific error"),
+        Some(libc::EDQUOT) => Cow::Borrowed("EDQUOT: Disk quota exceeded"),
+        Some(libc::EEXIST) => Cow::Borrowed("EEXIST: File exists"),
+        Some(libc::EFAULT) => Cow::Borrowed("EFAULT: Bad address"),
+        Some(libc::EFBIG) => Cow::Borrowed("EFBIG: File too large"),
+        Some(libc::EHOSTDOWN) => Cow::Borrowed("EHOSTDOWN: Host is down"),
+        Some(libc::EHOSTUNREACH) => Cow::Borrowed("EHOSTUNREACH: No route to host"),
+        Some(libc::EHWPOISON) => Cow::Borrowed("EHWPOISON: Memory page has hardware error"),
+        Some(libc::EIDRM) => Cow::Borrowed("EIDRM: Identifier removed"),
+        Some(libc::EILSEQ) => {
+            Cow::Borrowed("EILSEQ: Invalid or incomplete multibyte or wide character")
+        }
+        Some(libc::EINPROGRESS) => Cow::Borrowed("EINPROGRESS: Operation now in progress"),
+        Some(libc::EINTR) => Cow::Borrowed("EINTR: Interrupted system call"),
+        Some(libc::EINVAL) => Cow::Borrowed("EINVAL: Invalid argument"),
+        Some(libc::EIO) => Cow::Borrowed("EIO: Input/output error"),
+        Some(libc::EISCONN) => Cow::Borrowed("EISCONN: Transport endpoint is already connected"),
+        Some(libc::EISDIR) => Cow::Borrowed("EISDIR: Is a directory"),
+        Some(libc::EISNAM) => Cow::Borrowed("EISNAM: Is a named type file"),
+        Some(libc::EKEYEXPIRED) => Cow::Borrowed("EKEYEXPIRED: Key has expired"),
+        Some(libc::EKEYREJECTED) => Cow::Borrowed("EKEYREJECTED: Key was rejected by service"),
+        Some(libc::EKEYREVOKED) => Cow::Borrowed("EKEYREVOKED: Key has been revoked"),
+        Some(libc::EL2HLT) => Cow::Borrowed("EL2HLT: Level 2 halted"),
+        Some(libc::EL2NSYNC) => Cow::Borrowed("EL2NSYNC: Level 2 not synchronized"),
+        Some(libc::EL3HLT) => Cow::Borrowed("EL3HLT: Level 3 halted"),
+        Some(libc::EL3RST) => Cow::Borrowed("EL3RST: Level 3 reset"),
+        Some(libc::ELIBACC) => Cow::Borrowed("ELIBACC: Can not access a needed shared library"),
+        Some(libc::ELIBBAD) => Cow::Borrowed("ELIBBAD: Accessing a corrupted shared library"),
+        Some(libc::ELIBEXEC) => Cow::Borrowed("ELIBEXEC: Cannot exec a shared library directly"),
+        Some(libc::ELIBMAX) => {
+            Cow::Borrowed("ELIBMAX: Attempting to link in too many shared libraries")
+        }
+        Some(libc::ELIBSCN) => Cow::Borrowed("ELIBSCN: .lib section in a.out corrupted"),
+        Some(libc::ELNRNG) => Cow::Borrowed("ELNRNG: Link number out of range"),
+        Some(libc::ELOOP) => Cow::Borrowed("ELOOP: Too many levels of symbolic links"),
+        Some(libc::EMEDIUMTYPE) => Cow::Borrowed("EMEDIUMTYPE: Wrong medium type"),
+        Some(libc::EMFILE) => Cow::Borrowed("EMFILE: Too many open files"),
+        Some(libc::EMLINK) => Cow::Borrowed("EMLINK: Too many links"),
+        Some(libc::EMSGSIZE) => Cow::Borrowed("EMSGSIZE: Message too long"),
+        Some(libc::EMULTIHOP) => Cow::Borrowed("EMULTIHOP: Multihop attempted"),
+        Some(libc::ENAMETOOLONG) => Cow::Borrowed("ENAMETOOLONG: File name too long"),
+        Some(libc::ENAVAIL) => Cow::Borrowed("ENAVAIL: No XENIX semaphores available"),
+        Some(libc::ENETDOWN) => Cow::Borrowed("ENETDOWN: Network is down"),
+        Some(libc::ENETRESET) => Cow::Borrowed("ENETRESET: Network dropped connection on reset"),
+        Some(libc::ENETUNREACH) => Cow::Borrowed("ENETUNREACH: Network is unreachable"),
+        Some(libc::ENFILE) => Cow::Borrowed("ENFILE: Too many open files in system"),
+        Some(libc::ENOANO) => Cow::Borrowed("ENOANO: No anode"),
+        Some(libc::ENOBUFS) => Cow::Borrowed("ENOBUFS: No buffer space available"),
+        Some(libc::ENOCSI) => Cow::Borrowed("ENOCSI: No CSI structure available"),
+        Some(libc::ENODATA) => Cow::Borrowed("ENODATA: No data available"),
+        Some(libc::ENODEV) => Cow::Borrowed("ENODEV: No such device"),
+        Some(libc::ENOENT) => Cow::Borrowed("ENOENT: No such file or directory"),
+        Some(libc::ENOEXEC) => Cow::Borrowed("ENOEXEC: Exec format error"),
+        Some(libc::ENOKEY) => Cow::Borrowed("ENOKEY: Required key not available"),
+        Some(libc::ENOLCK) => Cow::Borrowed("ENOLCK: No locks available"),
+        Some(libc::ENOLINK) => Cow::Borrowed("ENOLINK: Link has been severed"),
+        Some(libc::ENOMEDIUM) => Cow::Borrowed("ENOMEDIUM: No medium found"),
+        Some(libc::ENOMEM) => Cow::Borrowed("ENOMEM: Cannot allocate memory"),
+        Some(libc::ENOMSG) => Cow::Borrowed("ENOMSG: No message of desired type"),
+        Some(libc::ENONET) => Cow::Borrowed("ENONET: Machine is not on the network"),
+        Some(libc::ENOPKG) => Cow::Borrowed("ENOPKG: Package not installed"),
+        Some(libc::ENOPROTOOPT) => Cow::Borrowed("ENOPROTOOPT: Protocol not available"),
+        Some(libc::ENOSPC) => Cow::Borrowed("ENOSPC: No space left on device"),
+        Some(libc::ENOSR) => Cow::Borrowed("ENOSR: Out of streams resources"),
+        Some(libc::ENOSTR) => Cow::Borrowed("ENOSTR: Device not a stream"),
+        Some(libc::ENOSYS) => Cow::Borrowed("ENOSYS: Function not implemented"),
+        Some(libc::ENOTBLK) => Cow::Borrowed("ENOTBLK: Block device required"),
+        Some(libc::ENOTCONN) => Cow::Borrowed("ENOTCONN: Transport endpoint is not connected"),
+        Some(libc::ENOTDIR) => Cow::Borrowed("ENOTDIR: Not a directory"),
+        Some(libc::ENOTEMPTY) => Cow::Borrowed("ENOTEMPTY: Directory not empty"),
+        Some(libc::ENOTNAM) => Cow::Borrowed("ENOTNAM: Not a XENIX named type file"),
+        Some(libc::ENOTRECOVERABLE) => Cow::Borrowed("ENOTRECOVERABLE: State not recoverable"),
+        Some(libc::ENOTSOCK) => Cow::Borrowed("ENOTSOCK: Socket operation on non-socket"),
+        Some(libc::ENOTSUP) => Cow::Borrowed("ENOTSUP: Not supported"),
+        Some(libc::ENOTTY) => Cow::Borrowed("ENOTTY: Inappropriate ioctl for device"),
+        Some(libc::ENOTUNIQ) => Cow::Borrowed("ENOTUNIQ: Name not unique on network"),
+        Some(libc::ENXIO) => Cow::Borrowed("ENXIO: No such device or address"),
+        Some(libc::EOPNOTSUPP) => Cow::Borrowed("EOPNOTSUPP: Operation not supported"),
+        Some(libc::EOVERFLOW) => Cow::Borrowed("EOVERFLOW: Value too large for defined data type"),
+        Some(libc::EOWNERDEAD) => Cow::Borrowed("EOWNERDEAD: Owner died"),
+        Some(libc::EPERM) => Cow::Borrowed("EPERM: Operation not permitted"),
+        Some(libc::EPFNOSUPPORT) => Cow::Borrowed("EPFNOSUPPORT: Protocol family not supported"),
+        Some(libc::EPIPE) => Cow::Borrowed("EPIPE: Broken pipe"),
+        Some(libc::EPROTO) => Cow::Borrowed("EPROTO: Protocol error"),
+        Some(libc::EPROTONOSUPPORT) => Cow::Borrowed("EPROTONOSUPPORT: Protocol not supported"),
+        Some(libc::EPROTOTYPE) => Cow::Borrowed("EPROTOTYPE: Protocol wrong type for socket"),
+        Some(libc::ERANGE) => Cow::Borrowed("ERANGE: Numerical result out of range"),
+        Some(libc::EREMCHG) => Cow::Borrowed("EREMCHG: Remote address changed"),
+        Some(libc::EREMOTE) => Cow::Borrowed("EREMOTE: Object is remote"),
+        Some(libc::EREMOTEIO) => Cow::Borrowed("EREMOTEIO: Remote I/O error"),
+        Some(libc::ERESTART) => {
+            Cow::Borrowed("ERESTART: Interrupted system call should be restarted")
+        }
+        Some(libc::ERFKILL) => Cow::Borrowed("ERFKILL: Operation not possible due to RF-kill"),
+        Some(libc::EROFS) => Cow::Borrowed("EROFS: Read-only file system"),
+        Some(libc::ESHUTDOWN) => {
+            Cow::Borrowed("ESHUTDOWN: Cannot send after transport endpoint shutdown")
+        }
+        Some(libc::ESOCKTNOSUPPORT) => Cow::Borrowed("ESOCKTNOSUPPORT: Socket type not supported"),
+        Some(libc::ESPIPE) => Cow::Borrowed("ESPIPE: Illegal seek"),
+        Some(libc::ESRCH) => Cow::Borrowed("ESRCH: No such process"),
+        Some(libc::ESRMNT) => Cow::Borrowed("ESRMNT: Srmount error"),
+        Some(libc::ESTALE) => Cow::Borrowed("ESTALE: Stale file handle"),
+        Some(libc::ESTRPIPE) => Cow::Borrowed("ESTRPIPE: Streams pipe error"),
+        Some(libc::ETIME) => Cow::Borrowed("ETIME: Timer expired"),
+        Some(libc::ETIMEDOUT) => Cow::Borrowed("ETIMEDOUT: Connection timed out"),
+        Some(libc::ETOOMANYREFS) => {
+            Cow::Borrowed("ETOOMANYREFS: Too many references: cannot splice")
+        }
+        Some(libc::ETXTBSY) => Cow::Borrowed("ETXTBSY: Text file busy"),
+        Some(libc::EUCLEAN) => Cow::Borrowed("EUCLEAN: Structure needs cleaning"),
+        Some(libc::EUNATCH) => Cow::Borrowed("EUNATCH: Protocol driver not attached"),
+        Some(libc::EUSERS) => Cow::Borrowed("EUSERS: Too many users"),
+        Some(libc::EWOULDBLOCK) => Cow::Borrowed("EWOULDBLOCK: Operation would block"),
+        Some(libc::EXDEV) => Cow::Borrowed("EXDEV: Invalid cross-device link"),
+        Some(libc::EXFULL) => Cow::Borrowed("EXFULL: Exchange full"),
+        Some(errno) => Cow::Owned(format_unknown_errno(errno)),
+        None => format_non_errno(e),
+    };
 
-    // List taken from glibc, but with stuff not supported by Rust dropped.
-    // IMPORTANT: Keep in sync with `arbitrary_errno`. Ideally, this would use a proc macro or
-    // script, but I'm too lazy to do that for such a one-off thing that doesn't change often in
-    // practice.
-    match errno {
-        libc::E2BIG => CowStr::Borrowed("E2BIG: Argument list too long"),
-        libc::EACCES => CowStr::Borrowed("EACCES: Permission denied"),
-        libc::EADDRINUSE => CowStr::Borrowed("EADDRINUSE: Address already in use"),
-        libc::EADDRNOTAVAIL => CowStr::Borrowed("EADDRNOTAVAIL: Cannot assign requested address"),
-        libc::EADV => CowStr::Borrowed("EADV: Advertise error"),
-        libc::EAFNOSUPPORT => {
-            CowStr::Borrowed("EAFNOSUPPORT: Address family not supported by protocol")
-        }
-        libc::EAGAIN => CowStr::Borrowed("EAGAIN: Resource temporarily unavailable"),
-        libc::EALREADY => CowStr::Borrowed("EALREADY: Operation already in progress"),
-        libc::EBADE => CowStr::Borrowed("EBADE: Invalid exchange"),
-        libc::EBADF => CowStr::Borrowed("EBADF: Bad file descriptor"),
-        libc::EBADFD => CowStr::Borrowed("EBADFD: File descriptor in bad state"),
-        libc::EBADMSG => CowStr::Borrowed("EBADMSG: Bad message"),
-        libc::EBADR => CowStr::Borrowed("EBADR: Invalid request descriptor"),
-        libc::EBADRQC => CowStr::Borrowed("EBADRQC: Invalid request code"),
-        libc::EBADSLT => CowStr::Borrowed("EBADSLT: Invalid slot"),
-        libc::EBFONT => CowStr::Borrowed("EBFONT: Bad font file format"),
-        libc::EBUSY => CowStr::Borrowed("EBUSY: Device or resource busy"),
-        libc::ECANCELED => CowStr::Borrowed("ECANCELED: Operation canceled"),
-        libc::ECHILD => CowStr::Borrowed("ECHILD: No child processes"),
-        libc::ECHRNG => CowStr::Borrowed("ECHRNG: Channel number out of range"),
-        libc::ECOMM => CowStr::Borrowed("ECOMM: Communication error on send"),
-        libc::ECONNABORTED => CowStr::Borrowed("ECONNABORTED: Software caused connection abort"),
-        libc::ECONNREFUSED => CowStr::Borrowed("ECONNREFUSED: Connection refused"),
-        libc::ECONNRESET => CowStr::Borrowed("ECONNRESET: Connection reset by peer"),
-        libc::EDEADLK => CowStr::Borrowed("EDEADLK: Resource deadlock avoided"),
-        libc::EDESTADDRREQ => CowStr::Borrowed("EDESTADDRREQ: Destination address required"),
-        libc::EDOM => CowStr::Borrowed("EDOM: Numerical argument out of domain"),
-        libc::EDOTDOT => CowStr::Borrowed("EDOTDOT: RFS specific error"),
-        libc::EDQUOT => CowStr::Borrowed("EDQUOT: Disk quota exceeded"),
-        libc::EEXIST => CowStr::Borrowed("EEXIST: File exists"),
-        libc::EFAULT => CowStr::Borrowed("EFAULT: Bad address"),
-        libc::EFBIG => CowStr::Borrowed("EFBIG: File too large"),
-        libc::EHOSTDOWN => CowStr::Borrowed("EHOSTDOWN: Host is down"),
-        libc::EHOSTUNREACH => CowStr::Borrowed("EHOSTUNREACH: No route to host"),
-        libc::EHWPOISON => CowStr::Borrowed("EHWPOISON: Memory page has hardware error"),
-        libc::EIDRM => CowStr::Borrowed("EIDRM: Identifier removed"),
-        libc::EILSEQ => {
-            CowStr::Borrowed("EILSEQ: Invalid or incomplete multibyte or wide character")
-        }
-        libc::EINPROGRESS => CowStr::Borrowed("EINPROGRESS: Operation now in progress"),
-        libc::EINTR => CowStr::Borrowed("EINTR: Interrupted system call"),
-        libc::EINVAL => CowStr::Borrowed("EINVAL: Invalid argument"),
-        libc::EIO => CowStr::Borrowed("EIO: Input/output error"),
-        libc::EISCONN => CowStr::Borrowed("EISCONN: Transport endpoint is already connected"),
-        libc::EISDIR => CowStr::Borrowed("EISDIR: Is a directory"),
-        libc::EISNAM => CowStr::Borrowed("EISNAM: Is a named type file"),
-        libc::EKEYEXPIRED => CowStr::Borrowed("EKEYEXPIRED: Key has expired"),
-        libc::EKEYREJECTED => CowStr::Borrowed("EKEYREJECTED: Key was rejected by service"),
-        libc::EKEYREVOKED => CowStr::Borrowed("EKEYREVOKED: Key has been revoked"),
-        libc::EL2HLT => CowStr::Borrowed("EL2HLT: Level 2 halted"),
-        libc::EL2NSYNC => CowStr::Borrowed("EL2NSYNC: Level 2 not synchronized"),
-        libc::EL3HLT => CowStr::Borrowed("EL3HLT: Level 3 halted"),
-        libc::EL3RST => CowStr::Borrowed("EL3RST: Level 3 reset"),
-        libc::ELIBACC => CowStr::Borrowed("ELIBACC: Can not access a needed shared library"),
-        libc::ELIBBAD => CowStr::Borrowed("ELIBBAD: Accessing a corrupted shared library"),
-        libc::ELIBEXEC => CowStr::Borrowed("ELIBEXEC: Cannot exec a shared library directly"),
-        libc::ELIBMAX => {
-            CowStr::Borrowed("ELIBMAX: Attempting to link in too many shared libraries")
-        }
-        libc::ELIBSCN => CowStr::Borrowed("ELIBSCN: .lib section in a.out corrupted"),
-        libc::ELNRNG => CowStr::Borrowed("ELNRNG: Link number out of range"),
-        libc::ELOOP => CowStr::Borrowed("ELOOP: Too many levels of symbolic links"),
-        libc::EMEDIUMTYPE => CowStr::Borrowed("EMEDIUMTYPE: Wrong medium type"),
-        libc::EMFILE => CowStr::Borrowed("EMFILE: Too many open files"),
-        libc::EMLINK => CowStr::Borrowed("EMLINK: Too many links"),
-        libc::EMSGSIZE => CowStr::Borrowed("EMSGSIZE: Message too long"),
-        libc::EMULTIHOP => CowStr::Borrowed("EMULTIHOP: Multihop attempted"),
-        libc::ENAMETOOLONG => CowStr::Borrowed("ENAMETOOLONG: File name too long"),
-        libc::ENAVAIL => CowStr::Borrowed("ENAVAIL: No XENIX semaphores available"),
-        libc::ENETDOWN => CowStr::Borrowed("ENETDOWN: Network is down"),
-        libc::ENETRESET => CowStr::Borrowed("ENETRESET: Network dropped connection on reset"),
-        libc::ENETUNREACH => CowStr::Borrowed("ENETUNREACH: Network is unreachable"),
-        libc::ENFILE => CowStr::Borrowed("ENFILE: Too many open files in system"),
-        libc::ENOANO => CowStr::Borrowed("ENOANO: No anode"),
-        libc::ENOBUFS => CowStr::Borrowed("ENOBUFS: No buffer space available"),
-        libc::ENOCSI => CowStr::Borrowed("ENOCSI: No CSI structure available"),
-        libc::ENODATA => CowStr::Borrowed("ENODATA: No data available"),
-        libc::ENODEV => CowStr::Borrowed("ENODEV: No such device"),
-        libc::ENOENT => CowStr::Borrowed("ENOENT: No such file or directory"),
-        libc::ENOEXEC => CowStr::Borrowed("ENOEXEC: Exec format error"),
-        libc::ENOKEY => CowStr::Borrowed("ENOKEY: Required key not available"),
-        libc::ENOLCK => CowStr::Borrowed("ENOLCK: No locks available"),
-        libc::ENOLINK => CowStr::Borrowed("ENOLINK: Link has been severed"),
-        libc::ENOMEDIUM => CowStr::Borrowed("ENOMEDIUM: No medium found"),
-        libc::ENOMEM => CowStr::Borrowed("ENOMEM: Cannot allocate memory"),
-        libc::ENOMSG => CowStr::Borrowed("ENOMSG: No message of desired type"),
-        libc::ENONET => CowStr::Borrowed("ENONET: Machine is not on the network"),
-        libc::ENOPKG => CowStr::Borrowed("ENOPKG: Package not installed"),
-        libc::ENOPROTOOPT => CowStr::Borrowed("ENOPROTOOPT: Protocol not available"),
-        libc::ENOSPC => CowStr::Borrowed("ENOSPC: No space left on device"),
-        libc::ENOSR => CowStr::Borrowed("ENOSR: Out of streams resources"),
-        libc::ENOSTR => CowStr::Borrowed("ENOSTR: Device not a stream"),
-        libc::ENOSYS => CowStr::Borrowed("ENOSYS: Function not implemented"),
-        libc::ENOTBLK => CowStr::Borrowed("ENOTBLK: Block device required"),
-        libc::ENOTCONN => CowStr::Borrowed("ENOTCONN: Transport endpoint is not connected"),
-        libc::ENOTDIR => CowStr::Borrowed("ENOTDIR: Not a directory"),
-        libc::ENOTEMPTY => CowStr::Borrowed("ENOTEMPTY: Directory not empty"),
-        libc::ENOTNAM => CowStr::Borrowed("ENOTNAM: Not a XENIX named type file"),
-        libc::ENOTRECOVERABLE => CowStr::Borrowed("ENOTRECOVERABLE: State not recoverable"),
-        libc::ENOTSOCK => CowStr::Borrowed("ENOTSOCK: Socket operation on non-socket"),
-        libc::ENOTSUP => CowStr::Borrowed("ENOTSUP: Not supported"),
-        libc::ENOTTY => CowStr::Borrowed("ENOTTY: Inappropriate ioctl for device"),
-        libc::ENOTUNIQ => CowStr::Borrowed("ENOTUNIQ: Name not unique on network"),
-        libc::ENXIO => CowStr::Borrowed("ENXIO: No such device or address"),
-        libc::EOPNOTSUPP => CowStr::Borrowed("EOPNOTSUPP: Operation not supported"),
-        libc::EOVERFLOW => CowStr::Borrowed("EOVERFLOW: Value too large for defined data type"),
-        libc::EOWNERDEAD => CowStr::Borrowed("EOWNERDEAD: Owner died"),
-        libc::EPERM => CowStr::Borrowed("EPERM: Operation not permitted"),
-        libc::EPFNOSUPPORT => CowStr::Borrowed("EPFNOSUPPORT: Protocol family not supported"),
-        libc::EPIPE => CowStr::Borrowed("EPIPE: Broken pipe"),
-        libc::EPROTO => CowStr::Borrowed("EPROTO: Protocol error"),
-        libc::EPROTONOSUPPORT => CowStr::Borrowed("EPROTONOSUPPORT: Protocol not supported"),
-        libc::EPROTOTYPE => CowStr::Borrowed("EPROTOTYPE: Protocol wrong type for socket"),
-        libc::ERANGE => CowStr::Borrowed("ERANGE: Numerical result out of range"),
-        libc::EREMCHG => CowStr::Borrowed("EREMCHG: Remote address changed"),
-        libc::EREMOTE => CowStr::Borrowed("EREMOTE: Object is remote"),
-        libc::EREMOTEIO => CowStr::Borrowed("EREMOTEIO: Remote I/O error"),
-        libc::ERESTART => CowStr::Borrowed("ERESTART: Interrupted system call should be restarted"),
-        libc::ERFKILL => CowStr::Borrowed("ERFKILL: Operation not possible due to RF-kill"),
-        libc::EROFS => CowStr::Borrowed("EROFS: Read-only file system"),
-        libc::ESHUTDOWN => {
-            CowStr::Borrowed("ESHUTDOWN: Cannot send after transport endpoint shutdown")
-        }
-        libc::ESOCKTNOSUPPORT => CowStr::Borrowed("ESOCKTNOSUPPORT: Socket type not supported"),
-        libc::ESPIPE => CowStr::Borrowed("ESPIPE: Illegal seek"),
-        libc::ESRCH => CowStr::Borrowed("ESRCH: No such process"),
-        libc::ESRMNT => CowStr::Borrowed("ESRMNT: Srmount error"),
-        libc::ESTALE => CowStr::Borrowed("ESTALE: Stale file handle"),
-        libc::ESTRPIPE => CowStr::Borrowed("ESTRPIPE: Streams pipe error"),
-        libc::ETIME => CowStr::Borrowed("ETIME: Timer expired"),
-        libc::ETIMEDOUT => CowStr::Borrowed("ETIMEDOUT: Connection timed out"),
-        libc::ETOOMANYREFS => CowStr::Borrowed("ETOOMANYREFS: Too many references: cannot splice"),
-        libc::ETXTBSY => CowStr::Borrowed("ETXTBSY: Text file busy"),
-        libc::EUCLEAN => CowStr::Borrowed("EUCLEAN: Structure needs cleaning"),
-        libc::EUNATCH => CowStr::Borrowed("EUNATCH: Protocol driver not attached"),
-        libc::EUSERS => CowStr::Borrowed("EUSERS: Too many users"),
-        libc::EWOULDBLOCK => CowStr::Borrowed("EWOULDBLOCK: Operation would block"),
-        libc::EXDEV => CowStr::Borrowed("EXDEV: Invalid cross-device link"),
-        libc::EXFULL => CowStr::Borrowed("EXFULL: Exchange full"),
-        _ => CowStr::Owned(format_unknown_errno(errno)),
+    if let Some(syscall) = syscall {
+        let mut s = result.into_owned();
+        s.push_str(" from syscall '");
+        s.push_str(syscall);
+        s.push('\'');
+        Cow::Owned(s)
+    } else {
+        result
     }
 }
 
@@ -323,22 +339,10 @@ pub fn errno_shrink(code: libc::c_int) -> impl Iterator<Item = libc::c_int> {
 #[cold]
 #[inline(never)]
 pub fn panic_errno(e: Error, syscall_name: &'static str) -> ! {
-    std::panic::panic_any(normalize_errno(e, Some(syscall_name)).into_owned())
-}
-
-pub fn normalize_errno(e: Error, syscall: Option<&'static str>) -> CowStr<'static> {
-    let result = match e.raw_os_error() {
-        Some(errno) => format_errno(errno),
-        None => format_non_errno(e),
-    };
-
-    if let Some(syscall) = syscall {
-        let mut s = result.into_owned().into_string();
-        s.push_str(" from syscall '");
-        s.push_str(syscall);
-        s.push('\'');
-        CowStr::Owned(s.into())
-    } else {
-        result
+    // Have to do a bit of a dance here to ensure it's displayed properly. The tricks I use to
+    // reduce copying are pretty non-standard.
+    match normalize_errno(e, Some(syscall_name)) {
+        Cow::Borrowed(s) => std::panic::panic_any(s),
+        Cow::Owned(s) => std::panic::panic_any(s),
     }
 }

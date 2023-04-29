@@ -1,38 +1,20 @@
 use crate::prelude::*;
 
-struct CowStrError(CowStr<'static>);
-
-impl fmt::Debug for CowStrError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+#[doc(hidden)]
+#[inline(always)]
+pub fn __error_fmt(kind: ErrorKind, args: fmt::Arguments) -> Error {
+    match args.as_str() {
+        Some(error) => Error::new(kind, error),
+        None => Error::new(kind, args.to_string()),
     }
 }
 
-impl fmt::Display for CowStrError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
+macro_rules! error {
+    ($kind:path, $fmt:literal $($tt:tt)*) => {{
+        $crate::common::__error_fmt($kind, ::std::format_args!($fmt $($tt)*))
+    }};
+    ($fmt:literal $($tt:tt)*) => {{
+        $crate::common::__error_fmt(::std::io::ErrorKind::Other, ::std::format_args!($fmt $($tt)*))
+    }};
 }
-
-impl std::error::Error for CowStrError {
-    #[allow(deprecated)]
-    fn description(&self) -> &str {
-        match &self.0 {
-            CowStr::Borrowed(s) => s,
-            CowStr::Owned(s) => s,
-        }
-    }
-}
-
-pub fn err(msg: &'static str) -> Error {
-    cow_err(CowStr::Borrowed(msg))
-}
-
-pub fn string_err(msg: Box<str>) -> Error {
-    cow_err(CowStr::Owned(msg))
-}
-
-pub fn cow_err(msg: CowStr<'static>) -> Error {
-    // Avoid an extra allocation here.
-    Error::new(ErrorKind::Other, CowStrError(msg))
-}
+pub(crate) use error;

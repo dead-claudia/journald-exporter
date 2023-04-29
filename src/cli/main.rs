@@ -11,8 +11,8 @@ use crate::ffi::request_signal_when_parent_terminates;
 use crate::ffi::Signal;
 use crate::parent::start_parent;
 
-fn eprintln(msg: CowStr) {
-    let mut msg = msg.into_owned().into_string().into_bytes();
+fn eprintln(msg: Cow<str>) {
+    let mut msg = msg.into_owned().into_bytes();
     msg.push(b'\n');
     drop(io::stderr().write_all(&msg));
 }
@@ -22,6 +22,8 @@ pub fn main() {
     // trying to wire up the parent somehow while testing. Should also ensure this dies when its
     // parent dies, for the E2E tests (and in general when run via `systemd-run`).
     request_signal_when_parent_terminates(Signal::SIGTERM);
+
+    human_panic::setup_panic!();
 
     // Wire up the logger that's used everywhere to just print everything to stdout/stderr.
     log::set_max_level(log::LevelFilter::Trace);
@@ -63,7 +65,7 @@ impl log::Log for StderrLogger {
 
     fn log(&self, record: &log::Record) {
         // It's okay to print everything to stderr. This doesn't log informative messages anyways.
-        eprintln(CowStr::format(*record.args()));
+        eprintln(format_cow(*record.args()));
     }
 
     fn flush(&self) {

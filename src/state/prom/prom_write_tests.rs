@@ -2,28 +2,27 @@ use crate::prelude::*;
 
 use super::*;
 
-fn render(snapshot: PromSnapshot) -> Box<[u8]> {
+fn render(snapshot: PromSnapshot) -> Vec<u8> {
     render_openapi_metrics(
         &PromEnvironment::new(mock_system_time(123, 456)),
         &snapshot,
         &get_user_group_table(),
     )
+    .unwrap()
 }
 
 // Get this noise out. Also gets tedious editing the length every time I want to add an entry or
 // modify an existing one.
-fn assert_snapshot_eq(actual: Box<[u8]>, expected: &'static [u8]) {
+fn assert_snapshot_eq(actual: Vec<u8>, expected: &'static [u8]) {
     // This is optimized somewhat to try to speed up Miri in one of the slowest parts. Won't make
     // literally any difference for the standard `cargo test`.
 
-    let mut real_expected: Box<[u8]> = vec![0; expected.len() + 5].into();
+    let mut real_expected = Vec::new();
 
-    copy_to_start(
-        &mut real_expected[1..],
-        &truncate_usize_u32(expected.len()).to_le_bytes(),
-    );
+    real_expected.push(0);
+    real_expected.extend_from_slice(&truncate_usize_u32(expected.len()).to_le_bytes());
+    real_expected.extend_from_slice(expected);
 
-    copy_to_start(&mut real_expected[5..], expected);
     assert_eq!(BinaryToDebug(&actual), BinaryToDebug(&real_expected));
 }
 
@@ -38,7 +37,7 @@ fn renders_1_digit_entries_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -91,7 +90,7 @@ fn renders_max_entries_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -144,7 +143,7 @@ fn renders_max_fields_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -197,7 +196,7 @@ fn renders_max_data_ingested_bytes() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -250,7 +249,7 @@ fn renders_max_faults() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -303,7 +302,7 @@ fn renders_max_cursor_double_retries() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -356,7 +355,7 @@ fn renders_max_unreadable_entries() {
         unreadable_fields: u64::MAX,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -409,7 +408,7 @@ fn renders_max_corrupted_entries() {
         unreadable_fields: 0,
         corrupted_fields: u64::MAX,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -462,7 +461,7 @@ fn renders_max_requests() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: u64::MAX,
-        messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+        messages_ingested: ByteCountSnapshot::empty(),
     });
 
     assert_snapshot_eq(
@@ -515,13 +514,11 @@ fn renders_a_single_empty_message_key_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([ByteCountSnapshotEntry {
-                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
-                lines: 1,
-                bytes: 0,
-            }]),
-        },
+        messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+            key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+            lines: 1,
+            bytes: 0,
+        }]),
     });
 
     assert_snapshot_eq(
@@ -574,13 +571,11 @@ fn renders_a_single_small_message_key_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([ByteCountSnapshotEntry {
-                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
-                lines: 1,
-                bytes: 5,
-            }]),
-        },
+        messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+            key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+            lines: 1,
+            bytes: 5,
+        }]),
     });
 
     assert_snapshot_eq(
@@ -633,13 +628,11 @@ fn renders_a_single_max_len_message_key_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([ByteCountSnapshotEntry {
-                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
-                lines: 1,
-                bytes: u64::MAX,
-            }]),
-        },
+        messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+            key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+            lines: 1,
+            bytes: u64::MAX,
+        }]),
     });
 
     assert_snapshot_eq(
@@ -692,13 +685,11 @@ fn renders_a_single_max_lines_message_key_ingested() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([ByteCountSnapshotEntry {
-                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
-                lines: u64::MAX,
-                bytes: 5,
-            }]),
-        },
+        messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+            key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+            lines: u64::MAX,
+            bytes: 5,
+        }]),
     });
 
     assert_snapshot_eq(
@@ -751,25 +742,18 @@ fn renders_two_messages_across_two_services() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(456),
-                        Some(b"foo"),
-                        Priority::Informational,
-                    ),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(456), Some(123), Some(b"bar"), Priority::Warning),
-                    lines: 1,
-                    bytes: 5,
-                },
-            ]),
-        },
+        messages_ingested: ByteCountSnapshot::build([
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(456), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(456), Some(123), Some(b"bar"), Priority::Warning),
+                lines: 1,
+                bytes: 5,
+            },
+        ]),
     });
 
     assert_snapshot_eq(
@@ -800,16 +784,16 @@ journald_corrupted_fields_total 0
 journald_metrics_requests_created 123.456
 journald_metrics_requests_total 0
 # TYPE journald_messages_ingested counter
-journald_messages_ingested_created{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 123.456
-journald_messages_ingested_total{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 1
 journald_messages_ingested_created{service=\"bar\",priority=\"WARNING\",severity=\"4\",user=\"user_bar\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"bar\",priority=\"WARNING\",severity=\"4\",user=\"user_bar\",group=\"group_foo\"} 1
+journald_messages_ingested_created{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 123.456
+journald_messages_ingested_total{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 1
 # TYPE journald_messages_ingested_bytes counter
 # UNIT journald_messages_ingested_bytes bytes
-journald_messages_ingested_bytes_created{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 123.456
-journald_messages_ingested_bytes_total{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 5
 journald_messages_ingested_bytes_created{service=\"bar\",priority=\"WARNING\",severity=\"4\",user=\"user_bar\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"bar\",priority=\"WARNING\",severity=\"4\",user=\"user_bar\",group=\"group_foo\"} 5
+journald_messages_ingested_bytes_created{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 123.456
+journald_messages_ingested_bytes_total{service=\"foo\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_bar\"} 5
 # EOF
 "
     );
@@ -826,13 +810,11 @@ fn renders_1_fault_and_1_message() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([ByteCountSnapshotEntry {
-                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
-                lines: 1,
-                bytes: 5,
-            }]),
-        },
+        messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+            key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+            lines: 1,
+            bytes: 5,
+        }]),
     });
 
     assert_snapshot_eq(
@@ -885,55 +867,48 @@ fn renders_multiple_priority_levels_within_same_service() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Emergency),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Alert),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Critical),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Error),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Warning),
-                    lines: 2,
-                    bytes: 10,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Notice),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"foo"),
-                        Priority::Informational,
-                    ),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Debug),
-                    lines: 2,
-                    bytes: 10,
-                },
-            ]),
-        },
+        messages_ingested: ByteCountSnapshot::build([
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Emergency),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Alert),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Critical),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Error),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Warning),
+                lines: 2,
+                bytes: 10,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Notice),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Debug),
+                lines: 2,
+                bytes: 10,
+            },
+        ]),
     });
 
     assert_snapshot_eq(
@@ -1014,55 +989,48 @@ fn renders_5_faults_and_multiple_priority_levels_within_same_service() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new([
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Emergency),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Alert),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Critical),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Error),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Warning),
-                    lines: 2,
-                    bytes: 10,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Notice),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"foo"),
-                        Priority::Informational,
-                    ),
-                    lines: 1,
-                    bytes: 5,
-                },
-                ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Debug),
-                    lines: 2,
-                    bytes: 10,
-                },
-            ]),
-        },
+        messages_ingested: ByteCountSnapshot::build([
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Emergency),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Alert),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Critical),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Error),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Warning),
+                lines: 2,
+                bytes: 10,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Notice),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            },
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Debug),
+                lines: 2,
+                bytes: 10,
+            },
+        ]),
     });
 
     assert_snapshot_eq(
@@ -1208,9 +1176,7 @@ fn renders_500_faults_and_400_different_service_messages() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot {
-            data: Box::new(MESSAGES_INGESTED),
-        },
+        messages_ingested: ByteCountSnapshot::build(MESSAGES_INGESTED),
     });
 
     assert_snapshot_eq(
@@ -1243,644 +1209,644 @@ journald_metrics_requests_total 0
 # TYPE journald_messages_ingested counter
 journald_messages_ingested_created{service=\"service1\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service1\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service2\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service2\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service3\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service3\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service4\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service4\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service5\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service5\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service6\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service6\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service7\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service7\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service8\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service8\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service9\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service9\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service10\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service10\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service11\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service11\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service12\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service12\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service13\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service13\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service14\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service14\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service15\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service15\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service16\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service16\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service17\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service17\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service18\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service18\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service19\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service19\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
-journald_messages_ingested_created{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
-journald_messages_ingested_created{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_total{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service20\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
 journald_messages_ingested_created{service=\"service20\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
 journald_messages_ingested_created{service=\"service20\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
 journald_messages_ingested_created{service=\"service20\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service20\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
 journald_messages_ingested_created{service=\"service20\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
 journald_messages_ingested_created{service=\"service20\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 2
+journald_messages_ingested_created{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
+journald_messages_ingested_created{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_total{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 journald_messages_ingested_created{service=\"service20\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_total{service=\"service20\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 4
 # TYPE journald_messages_ingested_bytes counter
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created{service=\"service1\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service1\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service2\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service2\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service3\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service3\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service4\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service4\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service5\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service5\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service6\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service6\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service7\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service7\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service8\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service8\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service9\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service9\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service10\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service10\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service11\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service11\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service12\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service12\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service13\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service13\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service14\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service14\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service15\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service15\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service16\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service16\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service17\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service17\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service18\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service18\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service19\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service19\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
-journald_messages_ingested_bytes_created{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
-journald_messages_ingested_bytes_total{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"EMERG\",severity=\"0\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"ALERT\",severity=\"1\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"CRIT\",severity=\"2\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"ERR\",severity=\"3\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"WARNING\",severity=\"4\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"NOTICE\",severity=\"5\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"INFO\",severity=\"6\",user=\"user_foo\",group=\"group_foo\"} 10
+journald_messages_ingested_bytes_created{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service1\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service2\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service3\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service4\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service5\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service6\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service7\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service8\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service9\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service10\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service11\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service12\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service13\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service14\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service15\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service16\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service17\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service18\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
+journald_messages_ingested_bytes_created{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
+journald_messages_ingested_bytes_total{service=\"service19\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 journald_messages_ingested_bytes_created{service=\"service20\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 123.456
 journald_messages_ingested_bytes_total{service=\"service20\",priority=\"DEBUG\",severity=\"7\",user=\"user_foo\",group=\"group_foo\"} 20
 # EOF

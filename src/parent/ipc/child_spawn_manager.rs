@@ -25,21 +25,20 @@ impl<M: ParentIpcMethods> ChildSpawnManager<M> {
     }
 
     fn handle_prev_status(&mut self, status: IpcExitStatus) -> Option<io::Result<ExitResult>> {
-        for e in status.errors {
-            match e {
-                IpcError::Parent(e) => log::error!(
-                    "Parent IPC loop failed with error: {}",
-                    normalize_errno(e, None)
-                ),
-                IpcError::ChildWait(e) => {
-                    log::error!("Child wait failed with error: {}", normalize_errno(e, None))
-                }
-            }
+        if let Some(e) = status.parent_error {
+            log::error!(
+                "Parent IPC loop failed with error: {}",
+                normalize_errno(e, None)
+            );
+        }
+
+        if let Some(e) = status.child_wait_error {
+            log::error!("Child wait failed with error: {}", normalize_errno(e, None));
         }
 
         let result = match status.result {
             Some(result) => result,
-            _ => return Some(Err(err("Child errored during termination."))),
+            _ => return Some(Err(error!("Child errored during termination."))),
         };
 
         if self

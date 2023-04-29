@@ -23,81 +23,86 @@ pub trait ParentIpcMethods: Send + Sync + Sized {
 }
 
 #[derive(Debug)]
-pub enum IpcError {
-    Parent(Error),
-    ChildWait(Error),
+pub struct IpcExitStatus {
+    pub result: Option<ExitResult>,
+    pub parent_error: Option<Error>,
+    pub child_wait_error: Option<Error>,
 }
 
 // Only implement it for test, so it can satisfy `Arbitrary`. In prod, it should never be cloned
 // like this.
 #[cfg(test)]
-impl Clone for IpcError {
+impl Clone for IpcExitStatus {
     fn clone(&self) -> Self {
-        match self {
-            IpcError::Parent(e) => IpcError::Parent(error_clone(e)),
-            IpcError::ChildWait(e) => IpcError::ChildWait(error_clone(e)),
+        Self {
+            result: self.result,
+            parent_error: self.parent_error.as_ref().map(error_clone),
+            child_wait_error: self.child_wait_error.as_ref().map(error_clone),
         }
     }
 }
 
 #[cfg(test)]
-impl PartialEq for IpcError {
+impl PartialEq for IpcExitStatus {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (IpcError::Parent(left), IpcError::Parent(right)) => error_eq(left, right),
-            (IpcError::ChildWait(left), IpcError::ChildWait(right)) => error_eq(left, right),
-            _ => false,
-        }
+        self.result == other.result
+            && match (&self.parent_error, &other.parent_error) {
+                (None, None) => true,
+                (Some(a), Some(b)) => error_eq(a, b),
+                _ => false,
+            }
+            && match (&self.child_wait_error, &other.child_wait_error) {
+                (None, None) => true,
+                (Some(a), Some(b)) => error_eq(a, b),
+                _ => false,
+            }
     }
 }
 
 #[cfg(test)]
-impl Eq for IpcError {}
-
-#[cfg(test)]
-impl Arbitrary for IpcError {
-    fn arbitrary(g: &mut Gen) -> Self {
-        enum S {
-            Parent,
-            ChildWait,
-        }
-
-        match g.choose(&[S::Parent, S::ChildWait]).unwrap() {
-            S::Parent => Self::Parent(error_arbitrary(g)),
-            S::ChildWait => Self::ChildWait(error_arbitrary(g)),
-        }
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        match self {
-            IpcError::Parent(e) => Box::new(error_shrink(e).map(Self::Parent)),
-            IpcError::ChildWait(e) => Box::new(error_shrink(e).map(Self::ChildWait)),
-        }
-    }
-}
-
-#[derive(Debug)]
-#[cfg_attr(test, derive(Clone, PartialEq, Eq))]
-pub struct IpcExitStatus {
-    pub result: Option<ExitResult>,
-    pub errors: Vec<IpcError>,
-}
+impl Eq for IpcExitStatus {}
 
 #[cfg(test)]
 impl Arbitrary for IpcExitStatus {
     fn arbitrary(g: &mut Gen) -> Self {
         Self {
             result: Arbitrary::arbitrary(g),
-            errors: Arbitrary::arbitrary(g),
+            parent_error: <bool>::arbitrary(g).then(|| error_arbitrary(g)),
+            child_wait_error: <bool>::arbitrary(g).then(|| error_arbitrary(g)),
         }
     }
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let results = Vec::from_iter(self.result.shrink());
-        Box::new(self.errors.shrink().flat_map(move |errors| {
-            results.clone().into_iter().map(move |result| Self {
-                errors: errors.clone(),
-                result,
+        let result = self.result;
+        let child_wait_error = self.child_wait_error.as_ref().map(error_clone);
+
+        let parent_shrink = match &self.parent_error {
+            None => {
+                let iter: Box<dyn Iterator<Item = _>> = Box::new(std::iter::once(None));
+                iter
+            }
+            Some(e) => Box::new(std::iter::once(None).chain(error_shrink(e).map(Some))),
+        };
+
+        let child_wait_shrink = parent_shrink.flat_map(move |parent| match &child_wait_error {
+            None => {
+                let iter: Box<dyn Iterator<Item = _>> = Box::new(std::iter::once((parent, None)));
+                iter
+            }
+            Some(e) => Box::new(
+                std::iter::once((parent.as_ref().map(error_clone), None)).chain(
+                    error_shrink(e).map(move |child_wait| {
+                        (parent.as_ref().map(error_clone), Some(child_wait))
+                    }),
+                ),
+            ),
+        });
+
+        Box::new(child_wait_shrink.flat_map(move |(parent, child_wait)| {
+            result.shrink().map(move |r| IpcExitStatus {
+                result: r,
+                parent_error: parent.as_ref().map(error_clone),
+                child_wait_error: child_wait.as_ref().map(error_clone),
             })
         }))
     }
@@ -139,11 +144,13 @@ mod tests {
         assert_eq!(
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(0))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None
             },
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(0))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None
             },
         )
     }
@@ -153,11 +160,13 @@ mod tests {
         assert_ne!(
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(0))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None
             },
             IpcExitStatus {
                 result: Some(ExitResult::Signal(Signal::SIGINT)),
-                errors: vec![IpcError::Parent(ErrorKind::NotFound.into())],
+                parent_error: Some(ErrorKind::NotFound.into()),
+                child_wait_error: None,
             },
         );
     }

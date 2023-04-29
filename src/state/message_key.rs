@@ -15,12 +15,18 @@ Precedence for ordering, where `a < b` implies `a` comes before `b`:
 - Priority < UID < GID < service
 */
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(Copy))]
 pub struct ByteCountTableKey {
     pub uid: Option<u32>,
     pub gid: Option<u32>,
     pub service_repr: ServiceRepr,
+}
+
+impl ByteCountTableKey {
+    pub fn service(&self) -> Option<Service> {
+        self.service_repr.as_service()
+    }
 }
 
 #[cfg(test)]
@@ -97,16 +103,6 @@ impl MessageKey {
                 gid: None,
                 service_repr: ServiceRepr::EMPTY,
             },
-        }
-    }
-
-    pub fn copy_from_table_entry(priority: Priority, key: &ByteCountTableKey) -> Self {
-        // It's not copyable in production, as it's supposed to be minimally copied in general
-        // (in no small part due to its size).
-        #![allow(clippy::clone_on_copy)]
-        Self {
-            priority,
-            table_key: key.clone(),
         }
     }
 

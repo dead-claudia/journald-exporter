@@ -66,11 +66,13 @@ impl PromState {
     }
 
     pub fn add_message_line_ingested(&self, key: &MessageKey, msg_len: usize) {
-        self.messages_ingested.push_line(key, msg_len);
+        if !self.messages_ingested.push_line(key, msg_len) {
+            self.add_fault();
+        }
     }
 
-    pub fn snapshot(&self) -> PromSnapshot {
-        PromSnapshot {
+    pub fn snapshot(&self) -> Option<PromSnapshot> {
+        Some(PromSnapshot {
             entries_ingested: self.entries_ingested.current(),
             fields_ingested: self.fields_ingested.current(),
             data_ingested_bytes: self.data_ingested_bytes.current(),
@@ -79,7 +81,7 @@ impl PromState {
             unreadable_fields: self.unreadable_fields.current(),
             corrupted_fields: self.corrupted_fields.current(),
             metrics_requests: self.metrics_requests.current(),
-            messages_ingested: self.messages_ingested.snapshot(),
-        }
+            messages_ingested: self.messages_ingested.snapshot()?,
+        })
     }
 }
