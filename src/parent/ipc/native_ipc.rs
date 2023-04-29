@@ -105,17 +105,17 @@ impl ParentIpcMethods for NativeIpcMethods {
         }
 
         fn read_file(mut file: std::fs::File, buf: &mut [u8]) -> io::Result<IdTable> {
-            let mut result = Vec::new();
+            let mut parser = PasswdGroupParser::new();
             loop {
                 let len = file.read(buf)?;
                 if len == 0 {
                     break;
                 }
-                if !write_slices(&mut result, &[&buf[..len]]) {
+                if !parser.consume(&buf[..len]) {
                     return Err(Error::from_raw_os_error(libc::ENOMEM));
                 }
             }
-            Ok(parse_etc_passwd_etc_group(&result))
+            Ok(parser.extract())
         }
 
         let uid_table = read_file(uid_file, &mut guard.buf)?;

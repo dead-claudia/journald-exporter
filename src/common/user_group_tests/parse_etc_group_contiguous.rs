@@ -1,8 +1,13 @@
-use crate::common::parse_etc_passwd_etc_group as parse;
 use crate::common::IdTable;
 
 fn name(value: &[u8]) -> crate::prelude::IdName {
     crate::prelude::IdName::new(value)
+}
+
+fn parse(value: &[u8]) -> IdTable {
+    let mut parser = crate::common::PasswdGroupParser::new();
+    parser.consume(value);
+    parser.extract()
 }
 
 #[test]
@@ -13,7 +18,7 @@ fn detects_empty_names() {
 #[test]
 fn allows_single_character_names() {
     assert_eq!(
-        parse(b"a:x:123:123:::/sbin/nologin"),
+        parse(b"a:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"a"))])
     );
 }
@@ -21,7 +26,7 @@ fn allows_single_character_names() {
 #[test]
 fn allows_empty_passwords() {
     assert_eq!(
-        parse(b"a::123:123:::/sbin/nologin"),
+        parse(b"a::123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"a"))])
     );
 }
@@ -33,10 +38,7 @@ fn disallows_usernames_not_followed_by_a_colon() {
 
 #[test]
 fn disallows_empty_usernames() {
-    assert_eq!(
-        parse(b":x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b":x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
@@ -46,10 +48,7 @@ fn disallows_break_after_password() {
 
 #[test]
 fn disallows_empty_ids() {
-    assert_eq!(
-        parse(b"a:x::123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"a:x::foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
@@ -68,23 +67,23 @@ fn allows_break_after_id() {
 #[test]
 fn allows_small_alphanumeric_names() {
     assert_eq!(
-        parse(b"abc123:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"abc123"))]),
+        parse(b"abc123:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"abc123"))])
     );
 }
 
 #[test]
 fn allows_small_alphanumeric_names_ending_with_a_dollar_sign() {
     assert_eq!(
-        parse(b"abc123$:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"abc123$"))]),
+        parse(b"abc123$:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"abc123$"))])
     );
 }
 
 #[test]
 fn allows_large_alphanumeric_names() {
     assert_eq!(
-        parse(b"abcdefghijklmnopqrstuvwxyz123456:x:123:123:::/sbin/nologin"),
+        parse(b"abcdefghijklmnopqrstuvwxyz123456:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz123456"))]),
     );
 }
@@ -92,7 +91,7 @@ fn allows_large_alphanumeric_names() {
 #[test]
 fn allows_large_alphanumeric_names_ending_with_a_dollar_sign() {
     assert_eq!(
-        parse(b"abcdefghijklmnopqrstuvwxyz12345$:x:123:123:::/sbin/nologin"),
+        parse(b"abcdefghijklmnopqrstuvwxyz12345$:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz12345$"))]),
     );
 }
@@ -100,7 +99,7 @@ fn allows_large_alphanumeric_names_ending_with_a_dollar_sign() {
 #[test]
 fn disallows_slightly_too_large_alphanumeric_names() {
     assert_eq!(
-        parse(b"abcdefghijklmnopqrstuvwxyz123456x:x:123:123:::/sbin/nologin"),
+        parse(b"abcdefghijklmnopqrstuvwxyz123456x:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -108,7 +107,7 @@ fn disallows_slightly_too_large_alphanumeric_names() {
 #[test]
 fn disallows_slightly_too_large_alphanumeric_names_ending_with_a_dollar_sign() {
     assert_eq!(
-        parse(b"abcdefghijklmnopqrstuvwxyz12345x$:x:123:123:::/sbin/nologin"),
+        parse(b"abcdefghijklmnopqrstuvwxyz12345x$:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -116,7 +115,7 @@ fn disallows_slightly_too_large_alphanumeric_names_ending_with_a_dollar_sign() {
 #[test]
 fn disallows_far_too_large_alphanumeric_names() {
     assert_eq!(
-        parse(b"abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:123:::/sbin/nologin"),
+        parse(b"abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -124,9 +123,7 @@ fn disallows_far_too_large_alphanumeric_names() {
 #[test]
 fn disallows_far_too_large_alphanumeric_names_ending_with_a_dollar_sign() {
     assert_eq!(
-        parse(
-            b"abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:123:::/sbin/nologin",
-        ),
+        parse(b"abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -134,91 +131,52 @@ fn disallows_far_too_large_alphanumeric_names_ending_with_a_dollar_sign() {
 #[test]
 fn allows_initial_underscores() {
     assert_eq!(
-        parse(b"_user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"_user"))]),
+        parse(b"_user:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"_user"))])
     );
 }
 
 #[test]
 fn disallows_initial_dollar_signs() {
-    assert_eq!(
-        parse(b"$user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"$user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_initial_hyphens() {
-    assert_eq!(
-        parse(b"-user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"-user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_initial_numbers() {
-    assert_eq!(
-        parse(b"0user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"1user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"2user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"3user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"4user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"5user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"6user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"7user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"8user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"9user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"0user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"1user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"2user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"3user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"4user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"5user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"6user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"7user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"8user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"9user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_initial_hash_signs() {
-    assert_eq!(
-        parse(b"#user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"#user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_names_with_special_characters_in_the_middle() {
     assert_eq!(
-        parse(b"s!o@m#e%u^s&e*r:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[]),
+        parse(b"s!o@m#e%u^s&e*r:x:123:foo,bar"),
+        IdTable::from_entries(&[])
     );
 }
 
 #[test]
 fn allows_inner_hyphens() {
     assert_eq!(
-        parse(b"some-user:x:123:123:::/sbin/nologin"),
+        parse(b"some-user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"some-user"))]),
     );
 }
@@ -226,15 +184,15 @@ fn allows_inner_hyphens() {
 #[test]
 fn allows_trailing_hyphens() {
     assert_eq!(
-        parse(b"user-:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"user-"))]),
+        parse(b"user-:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"user-"))])
     );
 }
 
 #[test]
 fn allows_inner_underscores() {
     assert_eq!(
-        parse(b"some_user:x:123:123:::/sbin/nologin"),
+        parse(b"some_user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"some_user"))]),
     );
 }
@@ -242,8 +200,8 @@ fn allows_inner_underscores() {
 #[test]
 fn allows_trailing_underscores() {
     assert_eq!(
-        parse(b"user_:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"user_"))]),
+        parse(b"user_:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"user_"))])
     );
 }
 
@@ -255,16 +213,16 @@ fn detects_empty_names_after_empty_line() {
 #[test]
 fn allows_single_character_names_after_empty_line() {
     assert_eq!(
-        parse(b"\na:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"a"))]),
+        parse(b"\na:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"a"))])
     );
 }
 
 #[test]
 fn allows_empty_passwords_after_empty_line() {
     assert_eq!(
-        parse(b"\na::123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"a"))]),
+        parse(b"\na::123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"a"))])
     );
 }
 
@@ -275,10 +233,7 @@ fn disallows_usernames_not_followed_by_a_colon_after_empty_line() {
 
 #[test]
 fn disallows_empty_usernames_after_empty_line() {
-    assert_eq!(
-        parse(b"\n:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"\n:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
@@ -288,10 +243,7 @@ fn disallows_break_after_password_after_empty_line() {
 
 #[test]
 fn disallows_empty_ids_after_empty_line() {
-    assert_eq!(
-        parse(b"\na:x::123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"\na:x::foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
@@ -315,15 +267,15 @@ fn allows_break_after_id_end_after_empty_line() {
 #[test]
 fn allows_small_alphanumeric_names_after_empty_line() {
     assert_eq!(
-        parse(b"\nabc123:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"abc123"))]),
+        parse(b"\nabc123:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"abc123"))])
     );
 }
 
 #[test]
 fn allows_small_alphanumeric_names_ending_with_a_dollar_sign_after_empty_line() {
     assert_eq!(
-        parse(b"\nabc123$:x:123:123:::/sbin/nologin"),
+        parse(b"\nabc123$:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"abc123$"))]),
     );
 }
@@ -331,7 +283,7 @@ fn allows_small_alphanumeric_names_ending_with_a_dollar_sign_after_empty_line() 
 #[test]
 fn allows_large_alphanumeric_names_after_empty_line() {
     assert_eq!(
-        parse(b"\nabcdefghijklmnopqrstuvwxyz123456:x:123:123:::/sbin/nologin"),
+        parse(b"\nabcdefghijklmnopqrstuvwxyz123456:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz123456"))]),
     );
 }
@@ -339,7 +291,7 @@ fn allows_large_alphanumeric_names_after_empty_line() {
 #[test]
 fn allows_large_alphanumeric_names_ending_with_a_dollar_sign_after_empty_line() {
     assert_eq!(
-        parse(b"\nabcdefghijklmnopqrstuvwxyz12345$:x:123:123:::/sbin/nologin"),
+        parse(b"\nabcdefghijklmnopqrstuvwxyz12345$:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz12345$"))]),
     );
 }
@@ -347,7 +299,7 @@ fn allows_large_alphanumeric_names_ending_with_a_dollar_sign_after_empty_line() 
 #[test]
 fn disallows_slightly_too_large_alphanumeric_names_after_empty_line() {
     assert_eq!(
-        parse(b"\nabcdefghijklmnopqrstuvwxyz123456x:x:123:123:::/sbin/nologin"),
+        parse(b"\nabcdefghijklmnopqrstuvwxyz123456x:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -355,7 +307,7 @@ fn disallows_slightly_too_large_alphanumeric_names_after_empty_line() {
 #[test]
 fn disallows_slightly_too_large_alphanumeric_names_ending_with_a_dollar_sign_after_empty_line() {
     assert_eq!(
-        parse(b"\nabcdefghijklmnopqrstuvwxyz12345x$:x:123:123:::/sbin/nologin"),
+        parse(b"\nabcdefghijklmnopqrstuvwxyz12345x$:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -363,9 +315,7 @@ fn disallows_slightly_too_large_alphanumeric_names_ending_with_a_dollar_sign_aft
 #[test]
 fn disallows_far_too_large_alphanumeric_names_after_empty_line() {
     assert_eq!(
-        parse(
-            b"\nabcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:123:::/sbin/nologin",
-        ),
+        parse(b"\nabcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -373,9 +323,7 @@ fn disallows_far_too_large_alphanumeric_names_after_empty_line() {
 #[test]
 fn disallows_far_too_large_alphanumeric_names_ending_with_a_dollar_sign_after_empty_line() {
     assert_eq!(
-        parse(
-            b"\nabcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:123:::/sbin/nologin",
-        ),
+        parse(b"\nabcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -383,91 +331,52 @@ fn disallows_far_too_large_alphanumeric_names_ending_with_a_dollar_sign_after_em
 #[test]
 fn allows_initial_underscores_after_empty_line() {
     assert_eq!(
-        parse(b"\n_user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"_user"))]),
+        parse(b"\n_user:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"_user"))])
     );
 }
 
 #[test]
 fn disallows_initial_dollar_signs_after_empty_line() {
-    assert_eq!(
-        parse(b"\n$user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"\n$user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_initial_hyphens_after_empty_line() {
-    assert_eq!(
-        parse(b"\n-user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"\n-user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_initial_numbers_after_empty_line() {
-    assert_eq!(
-        parse(b"\n0user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n1user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n2user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n3user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n4user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n5user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n6user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n7user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n8user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
-    assert_eq!(
-        parse(b"\n9user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"\n0user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n1user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n2user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n3user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n4user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n5user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n6user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n7user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n8user:x:123:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"\n9user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_initial_hash_signs_after_empty_line() {
-    assert_eq!(
-        parse(b"\n#user:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[])
-    );
+    assert_eq!(parse(b"\n#user:x:123:foo,bar"), IdTable::from_entries(&[]));
 }
 
 #[test]
 fn disallows_names_with_special_characters_in_the_middle_after_empty_line() {
     assert_eq!(
-        parse(b"\ns!o@m#e%u^s&e*r:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[]),
+        parse(b"\ns!o@m#e%u^s&e*r:x:123:foo,bar"),
+        IdTable::from_entries(&[])
     );
 }
 
 #[test]
 fn allows_inner_hyphens_after_empty_line() {
     assert_eq!(
-        parse(b"\nsome-user:x:123:123:::/sbin/nologin"),
+        parse(b"\nsome-user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"some-user"))]),
     );
 }
@@ -475,15 +384,15 @@ fn allows_inner_hyphens_after_empty_line() {
 #[test]
 fn allows_trailing_hyphens_after_empty_line() {
     assert_eq!(
-        parse(b"\nuser-:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"user-"))]),
+        parse(b"\nuser-:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"user-"))])
     );
 }
 
 #[test]
 fn allows_inner_underscores_after_empty_line() {
     assert_eq!(
-        parse(b"\nsome_user:x:123:123:::/sbin/nologin"),
+        parse(b"\nsome_user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"some_user"))]),
     );
 }
@@ -491,15 +400,15 @@ fn allows_inner_underscores_after_empty_line() {
 #[test]
 fn allows_trailing_underscores_after_empty_line() {
     assert_eq!(
-        parse(b"\nuser_:x:123:123:::/sbin/nologin"),
-        IdTable::from_entries(&[(123, name(b"user_"))]),
+        parse(b"\nuser_:x:123:foo,bar"),
+        IdTable::from_entries(&[(123, name(b"user_"))])
     );
 }
 
 #[test]
 fn detects_empty_names_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n"),
+        parse(b"user:x:123:foo,bar\n"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -507,7 +416,7 @@ fn detects_empty_names_after_successful_line() {
 #[test]
 fn allows_single_character_names_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\na:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"a"))]),
     );
 }
@@ -515,7 +424,7 @@ fn allows_single_character_names_after_successful_line() {
 #[test]
 fn allows_empty_passwords_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na::456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\na::456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"a"))]),
     );
 }
@@ -523,15 +432,15 @@ fn allows_empty_passwords_after_successful_line() {
 #[test]
 fn disallows_usernames_not_followed_by_a_colon_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na"),
-        IdTable::from_entries(&[(123, name(b"user"))]),
+        parse(b"user:x:123:foo,bar\na"),
+        IdTable::from_entries(&[(123, name(b"user"))])
     );
 }
 
 #[test]
 fn disallows_empty_usernames_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -539,7 +448,7 @@ fn disallows_empty_usernames_after_successful_line() {
 #[test]
 fn disallows_break_after_password_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na:x\n"),
+        parse(b"user:x:123:foo,bar\na:x\n"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -547,7 +456,7 @@ fn disallows_break_after_password_after_successful_line() {
 #[test]
 fn disallows_empty_ids_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na:x::123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\na:x::foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -555,7 +464,7 @@ fn disallows_empty_ids_after_successful_line() {
 #[test]
 fn disallows_break_before_id_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na:x:\n"),
+        parse(b"user:x:123:foo,bar\na:x:\n"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -563,7 +472,7 @@ fn disallows_break_before_id_after_successful_line() {
 #[test]
 fn disallows_break_before_id_end_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na:x:1\n"),
+        parse(b"user:x:123:foo,bar\na:x:1\n"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -571,7 +480,7 @@ fn disallows_break_before_id_end_after_successful_line() {
 #[test]
 fn allows_break_after_id_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\na:x:1:\n"),
+        parse(b"user:x:123:foo,bar\na:x:1:\n"),
         IdTable::from_entries(&[(123, name(b"user")), (1, name(b"a"))]),
     );
 }
@@ -579,7 +488,7 @@ fn allows_break_after_id_after_successful_line() {
 #[test]
 fn allows_small_alphanumeric_names_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\nabc123:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\nabc123:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"abc123"))]),
     );
 }
@@ -587,7 +496,7 @@ fn allows_small_alphanumeric_names_after_successful_line() {
 #[test]
 fn allows_small_alphanumeric_names_ending_with_a_dollar_sign_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\nabc123$:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\nabc123$:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"abc123$"))]),
     );
 }
@@ -596,8 +505,8 @@ fn allows_small_alphanumeric_names_ending_with_a_dollar_sign_after_successful_li
 fn allows_large_alphanumeric_names_after_successful_line() {
     assert_eq!(
         parse(
-            b"user:x:123:123:::/sbin/nologin
-abcdefghijklmnopqrstuvwxyz123456:x:123:123:::/sbin/nologin",
+            b"user:x:123:foo,bar
+abcdefghijklmnopqrstuvwxyz123456:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz123456"))]),
     );
@@ -607,8 +516,8 @@ abcdefghijklmnopqrstuvwxyz123456:x:123:123:::/sbin/nologin",
 fn allows_large_alphanumeric_names_ending_with_a_dollar_sign_after_successful_line() {
     assert_eq!(
         parse(
-            b"user:x:123:123:::/sbin/nologin
-abcdefghijklmnopqrstuvwxyz12345$:x:123:123:::/sbin/nologin",
+            b"user:x:123:foo,bar
+abcdefghijklmnopqrstuvwxyz12345$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz12345$"))]),
     );
@@ -618,8 +527,8 @@ abcdefghijklmnopqrstuvwxyz12345$:x:123:123:::/sbin/nologin",
 fn disallows_slightly_too_large_alphanumeric_names_after_successful_line() {
     assert_eq!(
         parse(
-            b"user:x:123:123:::/sbin/nologin
-abcdefghijklmnopqrstuvwxyz123456x:x:123:123:::/sbin/nologin",
+            b"user:x:123:foo,bar
+abcdefghijklmnopqrstuvwxyz123456x:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
@@ -630,8 +539,8 @@ fn disallows_slightly_too_large_alphanumeric_names_ending_with_a_dollar_sign_aft
 {
     assert_eq!(
         parse(
-            b"user:x:123:123:::/sbin/nologin
-abcdefghijklmnopqrstuvwxyz12345x$:x:123:123:::/sbin/nologin",
+            b"user:x:123:foo,bar
+abcdefghijklmnopqrstuvwxyz12345x$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
@@ -641,8 +550,8 @@ abcdefghijklmnopqrstuvwxyz12345x$:x:123:123:::/sbin/nologin",
 fn disallows_far_too_large_alphanumeric_names_after_successful_line() {
     assert_eq!(
         parse(
-            b"user:x:123:123:::/sbin/nologin
-abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:123:::/sbin/nologin",
+            b"user:x:123:foo,bar
+abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
@@ -652,8 +561,8 @@ abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:123:::/sbin/nologi
 fn disallows_far_too_large_alphanumeric_names_ending_with_a_dollar_sign_after_successful_line() {
     assert_eq!(
         parse(
-            b"user:x:123:123:::/sbin/nologin
-abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:123:::/sbin/nologin",
+            b"user:x:123:foo,bar
+abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
@@ -662,7 +571,7 @@ abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:123:::/sbin/nolog
 #[test]
 fn allows_initial_underscores_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n_user:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n_user:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"_user"))]),
     );
 }
@@ -670,7 +579,7 @@ fn allows_initial_underscores_after_successful_line() {
 #[test]
 fn disallows_initial_dollar_signs_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n$user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n$user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -678,7 +587,7 @@ fn disallows_initial_dollar_signs_after_successful_line() {
 #[test]
 fn disallows_initial_hyphens_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n-user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n-user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -686,43 +595,43 @@ fn disallows_initial_hyphens_after_successful_line() {
 #[test]
 fn disallows_initial_numbers_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n0user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n0user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n1user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n1user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n2user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n2user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n3user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n3user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n4user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n4user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n5user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n5user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n6user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n6user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n7user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n7user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n8user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n8user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n9user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n9user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -730,7 +639,7 @@ fn disallows_initial_numbers_after_successful_line() {
 #[test]
 fn disallows_initial_hash_signs_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\n#user:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\n#user:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -738,7 +647,7 @@ fn disallows_initial_hash_signs_after_successful_line() {
 #[test]
 fn disallows_names_with_special_characters_in_the_middle_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\ns!o@m#e%u^s&e*r:x:123:123:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\ns!o@m#e%u^s&e*r:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user"))]),
     );
 }
@@ -746,7 +655,7 @@ fn disallows_names_with_special_characters_in_the_middle_after_successful_line()
 #[test]
 fn allows_inner_hyphens_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\nsome-user:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\nsome-user:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"some-user"))]),
     );
 }
@@ -754,7 +663,7 @@ fn allows_inner_hyphens_after_successful_line() {
 #[test]
 fn allows_trailing_hyphens_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\nuser-:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\nuser-:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"user-"))]),
     );
 }
@@ -762,7 +671,7 @@ fn allows_trailing_hyphens_after_successful_line() {
 #[test]
 fn allows_inner_underscores_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\nsome_user:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\nsome_user:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"some_user"))]),
     );
 }
@@ -770,7 +679,7 @@ fn allows_inner_underscores_after_successful_line() {
 #[test]
 fn allows_trailing_underscores_after_successful_line() {
     assert_eq!(
-        parse(b"user:x:123:123:::/sbin/nologin\nuser_:x:456:456:::/sbin/nologin"),
+        parse(b"user:x:123:foo,bar\nuser_:x:456:foo,bar"),
         IdTable::from_entries(&[(123, name(b"user")), (456, name(b"user_"))]),
     );
 }
@@ -786,9 +695,7 @@ fn detects_empty_names_after_dropped_line() {
 #[test]
 fn allows_single_character_names_after_dropped_line() {
     assert_eq!(
-        parse(
-            b"intentionally invalid line with spaces and !other# n0n$3nse&\na:x:123:123:::/sbin/nologin"
-        ),
+        parse(b"intentionally invalid line with spaces and !other# n0n$3nse&\na:x:123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"a"))]),
     );
 }
@@ -796,9 +703,7 @@ fn allows_single_character_names_after_dropped_line() {
 #[test]
 fn allows_empty_passwords_after_dropped_line() {
     assert_eq!(
-        parse(
-            b"intentionally invalid line with spaces and !other# n0n$3nse&\na::123:123:::/sbin/nologin"
-        ),
+        parse(b"intentionally invalid line with spaces and !other# n0n$3nse&\na::123:foo,bar"),
         IdTable::from_entries(&[(123, name(b"a"))]),
     );
 }
@@ -814,9 +719,7 @@ fn disallows_usernames_not_followed_by_a_colon_after_dropped_line() {
 #[test]
 fn disallows_empty_usernames_after_dropped_line() {
     assert_eq!(
-        parse(
-            b"intentionally invalid line with spaces and !other# n0n$3nse&\n:x:123:123:::/sbin/nologin"
-        ),
+        parse(b"intentionally invalid line with spaces and !other# n0n$3nse&\n:x:123:foo,bar"),
         IdTable::from_entries(&[]),
     );
 }
@@ -834,7 +737,7 @@ fn disallows_empty_ids_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-a:x::123:::/sbin/nologin",
+a:x::foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -869,7 +772,7 @@ fn allows_small_alphanumeric_names_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abc123:x:123:123:::/sbin/nologin",
+abc123:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"abc123"))]),
     );
@@ -880,7 +783,7 @@ fn allows_small_alphanumeric_names_ending_with_a_dollar_sign_after_dropped_line(
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abc123$:x:123:123:::/sbin/nologin",
+abc123$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"abc123$"))]),
     );
@@ -891,7 +794,7 @@ fn allows_large_alphanumeric_names_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abcdefghijklmnopqrstuvwxyz123456:x:123:123:::/sbin/nologin",
+abcdefghijklmnopqrstuvwxyz123456:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz123456"))]),
     );
@@ -902,7 +805,7 @@ fn allows_large_alphanumeric_names_ending_with_a_dollar_sign_after_dropped_line(
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abcdefghijklmnopqrstuvwxyz12345$:x:123:123:::/sbin/nologin",
+abcdefghijklmnopqrstuvwxyz12345$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"abcdefghijklmnopqrstuvwxyz12345$"))]),
     );
@@ -913,7 +816,7 @@ fn disallows_slightly_too_large_alphanumeric_names_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abcdefghijklmnopqrstuvwxyz123456x:x:123:123:::/sbin/nologin",
+abcdefghijklmnopqrstuvwxyz123456x:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -924,7 +827,7 @@ fn disallows_slightly_too_large_alphanumeric_names_ending_with_a_dollar_sign_aft
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abcdefghijklmnopqrstuvwxyz12345x$:x:123:123:::/sbin/nologin",
+abcdefghijklmnopqrstuvwxyz12345x$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -935,7 +838,7 @@ fn disallows_far_too_large_alphanumeric_names_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:123:::/sbin/nologin",
+abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -946,7 +849,7 @@ fn disallows_far_too_large_alphanumeric_names_ending_with_a_dollar_sign_after_dr
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:123:::/sbin/nologin",
+abcdefghijklmnopqrstuvwxyz123456abcdefghijklmnopqrstuvw$:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -957,7 +860,7 @@ fn allows_initial_underscores_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-_user:x:123:123:::/sbin/nologin",
+_user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"_user"))]),
     );
@@ -968,7 +871,7 @@ fn disallows_initial_dollar_signs_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-$user:x:123:123:::/sbin/nologin",
+$user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -979,7 +882,7 @@ fn disallows_initial_hyphens_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
--user:x:123:123:::/sbin/nologin",
+-user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -990,70 +893,70 @@ fn disallows_initial_numbers_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-0user:x:123:123:::/sbin/nologin",
+0user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-1user:x:123:123:::/sbin/nologin",
+1user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-2user:x:123:123:::/sbin/nologin",
+2user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-3user:x:123:123:::/sbin/nologin",
+3user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-4user:x:123:123:::/sbin/nologin",
+4user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-5user:x:123:123:::/sbin/nologin",
+5user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-6user:x:123:123:::/sbin/nologin",
+6user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-7user:x:123:123:::/sbin/nologin",
+7user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-8user:x:123:123:::/sbin/nologin",
+8user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-9user:x:123:123:::/sbin/nologin",
+9user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -1064,7 +967,7 @@ fn disallows_initial_hash_signs_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-#user:x:123:123:::/sbin/nologin",
+#user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -1075,7 +978,7 @@ fn disallows_names_with_special_characters_in_the_middle_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-s!o@m#e%u^s&e*r:x:123:123:::/sbin/nologin",
+s!o@m#e%u^s&e*r:x:123:foo,bar",
         ),
         IdTable::from_entries(&[]),
     );
@@ -1086,7 +989,7 @@ fn allows_inner_hyphens_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-some-user:x:123:123:::/sbin/nologin",
+some-user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"some-user"))]),
     );
@@ -1097,7 +1000,7 @@ fn allows_trailing_hyphens_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-user-:x:123:123:::/sbin/nologin",
+user-:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"user-"))]),
     );
@@ -1108,7 +1011,7 @@ fn allows_inner_underscores_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-some_user:x:123:123:::/sbin/nologin",
+some_user:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"some_user"))]),
     );
@@ -1119,9 +1022,277 @@ fn allows_trailing_underscores_after_dropped_line() {
     assert_eq!(
         parse(
             b"intentionally invalid line with spaces and !other# n0n$3nse&
-user_:x:123:123:::/sbin/nologin",
+user_:x:123:foo,bar",
         ),
         IdTable::from_entries(&[(123, name(b"user_"))]),
+    );
+}
+
+#[test]
+fn id_parser_works_for_unpadded_powers_of_10() {
+    assert_eq!(
+        parse(b"user:x:10:foo,bar"),
+        IdTable::from_entries(&[(10, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:100:foo,bar"),
+        IdTable::from_entries(&[(100, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:1000:foo,bar"),
+        IdTable::from_entries(&[(1000, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:10000:foo,bar"),
+        IdTable::from_entries(&[(10000, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:100000:foo,bar"),
+        IdTable::from_entries(&[(100000, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:1000000:foo,bar"),
+        IdTable::from_entries(&[(1000000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:10000000:foo,bar"),
+        IdTable::from_entries(&[(10000000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:100000000:foo,bar"),
+        IdTable::from_entries(&[(100000000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:1000000000:foo,bar"),
+        IdTable::from_entries(&[(1000000000, name(b"user"))]),
+    );
+}
+
+#[test]
+fn id_parser_works_for_padded_powers_of_10() {
+    assert_eq!(
+        parse(b"user:x:0000000001:foo,bar"),
+        IdTable::from_entries(&[(1, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:0000000010:foo,bar"),
+        IdTable::from_entries(&[(10, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:0000000100:foo,bar"),
+        IdTable::from_entries(&[(100, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0000001000:foo,bar"),
+        IdTable::from_entries(&[(1000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0000010000:foo,bar"),
+        IdTable::from_entries(&[(10000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0000100000:foo,bar"),
+        IdTable::from_entries(&[(100000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0001000000:foo,bar"),
+        IdTable::from_entries(&[(1000000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0010000000:foo,bar"),
+        IdTable::from_entries(&[(10000000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0100000000:foo,bar"),
+        IdTable::from_entries(&[(100000000, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:1000000000:foo,bar"),
+        IdTable::from_entries(&[(1000000000, name(b"user"))]),
+    );
+}
+
+#[test]
+fn id_parser_works_for_unpadded_powers_of_10_plus_1() {
+    assert_eq!(
+        parse(b"user:x:11:foo,bar"),
+        IdTable::from_entries(&[(11, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:101:foo,bar"),
+        IdTable::from_entries(&[(101, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:1001:foo,bar"),
+        IdTable::from_entries(&[(1001, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:10001:foo,bar"),
+        IdTable::from_entries(&[(10001, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:100001:foo,bar"),
+        IdTable::from_entries(&[(100001, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:1000001:foo,bar"),
+        IdTable::from_entries(&[(1000001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:10000001:foo,bar"),
+        IdTable::from_entries(&[(10000001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:100000001:foo,bar"),
+        IdTable::from_entries(&[(100000001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:1000000001:foo,bar"),
+        IdTable::from_entries(&[(1000000001, name(b"user"))]),
+    );
+}
+
+#[test]
+fn id_parser_works_for_padded_powers_of_10_plus_1() {
+    assert_eq!(
+        parse(b"user:x:0000000011:foo,bar"),
+        IdTable::from_entries(&[(11, name(b"user"))])
+    );
+    assert_eq!(
+        parse(b"user:x:0000000101:foo,bar"),
+        IdTable::from_entries(&[(101, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0000001001:foo,bar"),
+        IdTable::from_entries(&[(1001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0000010001:foo,bar"),
+        IdTable::from_entries(&[(10001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0000100001:foo,bar"),
+        IdTable::from_entries(&[(100001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0001000001:foo,bar"),
+        IdTable::from_entries(&[(1000001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0010000001:foo,bar"),
+        IdTable::from_entries(&[(10000001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:0100000001:foo,bar"),
+        IdTable::from_entries(&[(100000001, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:1000000001:foo,bar"),
+        IdTable::from_entries(&[(1000000001, name(b"user"))]),
+    );
+}
+
+#[test]
+fn id_parser_works_near_u32_representation_limit() {
+    assert_eq!(
+        parse(b"user:x:4294967290:foo,bar"),
+        IdTable::from_entries(&[(4294967290, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:4294967291:foo,bar"),
+        IdTable::from_entries(&[(4294967291, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:4294967292:foo,bar"),
+        IdTable::from_entries(&[(4294967292, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:4294967293:foo,bar"),
+        IdTable::from_entries(&[(4294967293, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:4294967294:foo,bar"),
+        IdTable::from_entries(&[(4294967294, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:4294967295:foo,bar"),
+        IdTable::from_entries(&[(4294967295, name(b"user"))]),
+    );
+    assert_eq!(
+        parse(b"user:x:4294967296:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:4294967297:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:4294967298:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:4294967299:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+}
+
+#[test]
+fn id_parser_rejects_numbers_suffixed_with_hyphens() {
+    assert_eq!(parse(b"user:x:0-:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:10-:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:100-:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:1000-:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:10000-:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:100000-:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(
+        parse(b"user:x:1000000-:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:10000000-:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:100000000-:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:429496729-:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:4294967295-:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+}
+
+#[test]
+fn id_parser_rejects_numbers_prefixed_with_hyphens() {
+    assert_eq!(parse(b"user:x:-0:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:-10:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:-100:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:-1000:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:-10000:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(parse(b"user:x:-100000:foo,bar"), IdTable::from_entries(&[]));
+    assert_eq!(
+        parse(b"user:x:-1000000:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:-10000000:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:-100000000:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:-429496729:foo,bar"),
+        IdTable::from_entries(&[])
+    );
+    assert_eq!(
+        parse(b"user:x:-4294967295:foo,bar"),
+        IdTable::from_entries(&[])
     );
 }
 
