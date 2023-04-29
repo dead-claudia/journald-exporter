@@ -19,6 +19,7 @@ impl std::fmt::Debug for IdName {
 }
 
 impl IdName {
+    #[cfg(test)]
     pub fn new(name_data: &[u8]) -> Self {
         let mut data = [0_u8; MAX_NAME_LEN];
         copy_to_start(&mut data, name_data);
@@ -130,102 +131,109 @@ The full format for each line is actually this:
   - `users...`: Zero or more users separated by commas, representing its members.
 */
 
-fn insert_name(names: &mut Vec<(u32, IdName)>, id: u32, name: &[u8]) {
-    let name = IdName::new(name);
-
-    for item in names.iter_mut() {
-        if item.0 == id {
-            item.1 = name;
-            return;
-        }
-    }
-
-    names.push((id, name));
+enum ParserState {
+    Drop,
+    Start,
+    Name(IdName),
+    NameEnd(IdName),
+    Password(IdName),
+    IdStart(IdName, u32),
+    IdPart(IdName, u32),
 }
 
-pub fn parse_etc_passwd_etc_group(data: &[u8]) -> IdTable {
-    let mut iter = data.iter().copied().enumerate();
-    let mut names = Vec::new();
+pub struct PasswdGroupParser {
+    state: ParserState,
+    names: Vec<(u32, IdName)>,
+}
 
-    'done: loop {
-        'parse_line: loop {
-            match iter.next() {
-                None => break 'done,
-                Some((name_start, b'_' | b'A'..=b'Z' | b'a'..=b'z')) => {
-                    let mut name_len = Wrapping(1);
-
-                    'parse_name: loop {
-                        match iter.next() {
-                            None => break 'done,
-                            Some((_, b':')) => break 'parse_name,
-                            Some(_) if name_len >= Wrapping(MAX_NAME_LEN) => break 'parse_line,
-                            Some((_, b'$')) => {
-                                name_len += 1;
-                                match iter.next() {
-                                    None => break 'done,
-                                    Some((_, b':')) => break 'parse_name,
-                                    Some(_) => break 'parse_line,
-                                }
-                            }
-                            Some((_, b'0'..=b'9' | b'_' | b'-' | b'A'..=b'Z' | b'a'..=b'z')) => {
-                                name_len += 1;
-                            }
-                            Some((_, b'\n')) => continue 'parse_line,
-                            Some(_) => break 'parse_line,
-                        }
-                    }
-
-                    'skip_password: loop {
-                        match iter.next() {
-                            None => break 'done,
-                            Some((_, b':')) => break 'skip_password,
-                            Some((_, b'\n')) => continue 'parse_line,
-                            Some(_) => continue 'skip_password,
-                        }
-                    }
-
-                    let mut id = match iter.next() {
-                        None => break 'done,
-                        Some((_, byte @ b'0'..=b'9')) => match parse_u32_digit(0, byte) {
-                            Some(id) => id,
-                            None => break 'parse_line,
-                        },
-                        Some((_, b'\n')) => continue 'parse_line,
-                        Some(_) => break 'parse_line,
-                    };
-
-                    loop {
-                        match iter.next() {
-                            None => break 'done,
-                            Some((_, byte @ b'0'..=b'9')) => match parse_u32_digit(id, byte) {
-                                Some(result) => id = result,
-                                None => break 'parse_line,
-                            },
-                            Some((_, b':')) => {
-                                let name_end = (Wrapping(name_start) + name_len).0;
-                                insert_name(&mut names, id, &data[name_start..name_end]);
-                                break 'parse_line;
-                            }
-                            Some((_, b'\n')) => continue 'parse_line,
-                            Some(_) => break 'parse_line,
-                        }
-                    }
-                }
-                Some((_, b'\n')) => continue 'parse_line,
-                Some(_) => break 'parse_line,
-            }
-        }
-
-        'drop: loop {
-            match iter.next() {
-                None => break 'done,
-                Some((_, b'\n')) => break 'drop,
-                Some(_) => {}
-            }
+impl PasswdGroupParser {
+    pub const fn new() -> Self {
+        Self {
+            state: ParserState::Start,
+            names: Vec::new(),
         }
     }
 
-    IdTable {
-        entries: names.into(),
+    pub fn extract(self) -> IdTable {
+        IdTable {
+            entries: self.names.into(),
+        }
+    }
+
+    fn insert_name(&mut self, name: IdName, id: u32) -> bool {
+        for item in self.names.iter_mut() {
+            if item.0 == id {
+                item.1 = name;
+                return true;
+            }
+        }
+
+        if self.names.try_reserve(1).is_err() {
+            return false;
+        }
+
+        self.names.push((id, name));
+        true
+    }
+
+    pub fn consume(&mut self, chunk: &[u8]) -> bool {
+        for &ch in chunk {
+            match (replace(&mut self.state, ParserState::Drop), ch) {
+                (_, b'\n') => self.state = ParserState::Start,
+
+                (ParserState::Start, b'_' | b'A'..=b'Z' | b'a'..=b'z') => {
+                    let mut data = [0; MAX_NAME_LEN];
+                    data[0] = ch;
+                    self.state = ParserState::Name(IdName { len: 1, data });
+                }
+
+                (ParserState::Name(mut name), b'$')
+                    if name.len < truncate_usize_u8(MAX_NAME_LEN) =>
+                {
+                    name.data[zero_extend_u8_usize(name.len)] = ch;
+                    name.len = name.len.wrapping_add(1);
+                    self.state = ParserState::NameEnd(name);
+                }
+
+                (
+                    ParserState::Name(mut name),
+                    b'0'..=b'9' | b'_' | b'-' | b'A'..=b'Z' | b'a'..=b'z',
+                ) if name.len < truncate_usize_u8(MAX_NAME_LEN) => {
+                    name.data[zero_extend_u8_usize(name.len)] = ch;
+                    name.len = name.len.wrapping_add(1);
+                    self.state = ParserState::Name(name);
+                }
+
+                (ParserState::Name(name) | ParserState::NameEnd(name), b':') => {
+                    self.state = ParserState::Password(name);
+                }
+
+                (ParserState::Password(name), b':') => {
+                    self.state = ParserState::IdStart(name, 0);
+                }
+
+                (ParserState::Password(name), _) => {
+                    self.state = ParserState::Password(name);
+                }
+
+                (ParserState::IdPart(name, acc), b':') => {
+                    if !self.insert_name(name, acc) {
+                        return false;
+                    }
+                    self.state = ParserState::Drop;
+                }
+
+                (ParserState::IdStart(name, acc) | ParserState::IdPart(name, acc), _) => {
+                    match parse_u32_digit(acc, ch) {
+                        Some(acc) => self.state = ParserState::IdPart(name, acc),
+                        None => self.state = ParserState::Drop,
+                    }
+                }
+
+                (_, _) => self.state = ParserState::Drop,
+            }
+        }
+
+        true
     }
 }
