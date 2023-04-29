@@ -201,7 +201,8 @@ mod tests {
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         )));
 
@@ -220,7 +221,8 @@ mod tests {
             S.methods().child_wait(),
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         );
 
@@ -245,7 +247,8 @@ mod tests {
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: None,
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         )));
 
@@ -264,7 +267,8 @@ mod tests {
             S.methods().child_wait(),
             IpcExitStatus {
                 result: None,
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         );
 
@@ -305,7 +309,8 @@ mod tests {
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         )));
 
@@ -342,7 +347,8 @@ mod tests {
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         )));
 
@@ -381,7 +387,8 @@ mod tests {
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         )));
 
@@ -424,7 +431,8 @@ mod tests {
             &SPAWN_CHILD_NOTIFY,
             IpcExitStatus {
                 result: Some(ExitResult::Code(ExitCode(1))),
-                errors: Vec::new(),
+                parent_error: None,
+                child_wait_error: None,
             },
         )));
 

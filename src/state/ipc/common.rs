@@ -32,22 +32,21 @@ impl ReadPhase {
 #[derive(Debug)]
 pub struct SliceAccumulator<T> {
     remaining: usize,
-    // This points to the current byte. To get the actual initialized slice, subtract
-    // `len - remaining` from the pointer.
-    data: Vec<T>,
+    // Use an option to mask when the vec failed to allocate.
+    data: Option<Vec<T>>,
 }
 
 impl<T> SliceAccumulator<T> {
     pub fn new(len: u32) -> Self {
         Self {
             remaining: zero_extend_u32_usize(len),
-            data: Vec::with_capacity(zero_extend_u32_usize(len)),
+            data: try_new_dynamic_vec(zero_extend_u32_usize(len)),
         }
     }
 
     #[cfg(test)]
     fn bytes_initialized(&self) -> usize {
-        self.data.len()
+        self.data.as_ref().map_or(0, |d| d.len())
     }
 
     pub fn has_remaining(&self) -> bool {
@@ -55,12 +54,12 @@ impl<T> SliceAccumulator<T> {
     }
 
     pub fn initialized(&self) -> &[T] {
-        &self.data
+        self.data.as_deref().unwrap_or(&[])
     }
 
-    pub fn finish(self) -> Box<[T]> {
+    pub fn finish(self) -> Option<Box<[T]>> {
         debug_assert_eq!(self.remaining, 0);
-        self.data.into()
+        self.data.map(|d| d.into())
     }
 
     pub fn push(&mut self, value: T) {
@@ -69,7 +68,11 @@ impl<T> SliceAccumulator<T> {
             Some(remaining) => self.remaining = remaining,
         }
 
-        self.data.push(value)
+        if let Some(data) = &mut self.data {
+            // FIXME: change this to https://github.com/rust-lang/rust/issues/100486 to ensure the
+            // invariant that it never re-allocates is asserted.
+            data.push(value);
+        }
     }
 }
 
@@ -86,7 +89,9 @@ impl SliceAccumulator<u8> {
             let extend_len = iter.buf.len().min(remaining_len);
             let (head, tail) = iter.buf.split_at(extend_len);
 
-            self.data.extend_from_slice(head);
+            if let Some(data) = &mut self.data {
+                data.extend_from_slice(head);
+            }
 
             iter.buf = tail;
             self.remaining = remaining_len.wrapping_sub(extend_len);
@@ -520,7 +525,7 @@ mod tests {
         assert_eq!(target.push_from_iter(&mut iter), true);
         assert_eq!(target.bytes_initialized(), 10);
         assert_eq!(target.has_remaining(), false);
-        assert_eq!(target.finish(), Box::from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+        assert_eq!(&*target.finish().unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         assert_eq!(iter.next(), None);
     }
 
@@ -532,7 +537,7 @@ mod tests {
         assert_eq!(target.push_from_iter(&mut iter), true);
         assert_eq!(target.bytes_initialized(), 10);
         assert_eq!(target.has_remaining(), false);
-        assert_eq!(target.finish(), Box::from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+        assert_eq!(&*target.finish().unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         assert_eq!(
             Vec::from_iter(std::iter::from_fn(move || iter.next())),
             vec![11, 12, 13, 14, 15]
@@ -571,8 +576,8 @@ mod tests {
         assert_eq!(target.bytes_initialized(), 10);
         assert_eq!(target.has_remaining(), false);
         assert_eq!(
-            target.finish(),
-            Box::from([b'A', b'B', b'C', 1, 2, 3, 4, 5, 6, 7])
+            &*target.finish().unwrap(),
+            &[b'A', b'B', b'C', 1, 2, 3, 4, 5, 6, 7]
         );
         assert_eq!(iter.next(), None);
     }
@@ -588,8 +593,8 @@ mod tests {
         assert_eq!(target.bytes_initialized(), 10);
         assert_eq!(target.has_remaining(), false);
         assert_eq!(
-            target.finish(),
-            Box::from([b'A', b'B', b'C', 1, 2, 3, 4, 5, 6, 7])
+            &*target.finish().unwrap(),
+            &[b'A', b'B', b'C', 1, 2, 3, 4, 5, 6, 7]
         );
         assert_eq!(
             Vec::from_iter(std::iter::from_fn(move || iter.next())),

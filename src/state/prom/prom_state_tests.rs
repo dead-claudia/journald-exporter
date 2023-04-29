@@ -32,7 +32,7 @@ fn returns_correct_initial_metrics() {
     static STATE: PromState = PromState::new();
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -54,7 +54,7 @@ fn correctly_tracks_a_single_fault() {
     STATE.add_fault();
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -76,7 +76,7 @@ fn correctly_tracks_a_single_cursor_double_retry() {
     STATE.add_cursor_double_retry();
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -98,7 +98,7 @@ fn correctly_tracks_a_single_unreadable_entry() {
     STATE.add_unreadable_field();
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -120,7 +120,7 @@ fn correctly_tracks_a_single_corrupted_entry() {
     STATE.add_corrupted_field();
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -142,7 +142,7 @@ fn correctly_tracks_a_single_set_of_requests() {
     STATE.add_metrics_requests(123);
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -172,7 +172,7 @@ fn correctly_tracks_a_single_zero_byte_value() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -182,18 +182,11 @@ fn correctly_tracks_a_single_zero_byte_value() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"foo"),
-                        Priority::Informational
-                    ),
-                    lines: 1,
-                    bytes: 0,
-                }])
-            },
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 0,
+            }]),
         }
     );
 }
@@ -208,7 +201,7 @@ fn correctly_tracks_a_single_message_without_a_service() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -218,13 +211,11 @@ fn correctly_tracks_a_single_message_without_a_service() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), None, Priority::Informational),
-                    lines: 1,
-                    bytes: 5,
-                }])
-            },
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), None, Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            }]),
         }
     );
 }
@@ -244,7 +235,7 @@ fn correctly_tracks_a_single_message_without_a_user() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -254,13 +245,11 @@ fn correctly_tracks_a_single_message_without_a_user() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(None, Some(123), Some(b"foo"), Priority::Informational),
-                    lines: 1,
-                    bytes: 5,
-                }])
-            },
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(None, Some(123), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            }]),
         }
     );
 }
@@ -280,7 +269,7 @@ fn correctly_tracks_a_single_message_without_a_group() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -290,13 +279,11 @@ fn correctly_tracks_a_single_message_without_a_group() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), None, Some(b"foo"), Priority::Informational),
-                    lines: 1,
-                    bytes: 5,
-                }])
-            },
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), None, Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            }]),
         }
     );
 }
@@ -316,7 +303,7 @@ fn correctly_tracks_a_single_message() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -326,18 +313,11 @@ fn correctly_tracks_a_single_message() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"foo"),
-                        Priority::Informational
-                    ),
-                    lines: 1,
-                    bytes: 5,
-                }])
-            },
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            }]),
         }
     );
 }
@@ -366,7 +346,7 @@ fn correctly_tracks_two_messages_across_two_services() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -376,30 +356,23 @@ fn correctly_tracks_two_messages_across_two_services() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([
-                    ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(456),
-                            Some(123),
-                            Some(b"bar"),
-                            Priority::Warning
-                        ),
-                        lines: 1,
-                        bytes: 7,
-                    },
-                    ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(456),
-                            Some(b"foo"),
-                            Priority::Informational
-                        ),
-                        lines: 1,
-                        bytes: 5,
-                    },
-                ])
-            },
+            messages_ingested: ByteCountSnapshot::build([
+                ByteCountSnapshotEntry {
+                    key: MessageKey::build(Some(456), Some(123), Some(b"bar"), Priority::Warning),
+                    lines: 1,
+                    bytes: 7,
+                },
+                ByteCountSnapshotEntry {
+                    key: MessageKey::build(
+                        Some(123),
+                        Some(456),
+                        Some(b"foo"),
+                        Priority::Informational
+                    ),
+                    lines: 1,
+                    bytes: 5,
+                },
+            ]),
         }
     );
 }
@@ -420,7 +393,7 @@ fn correctly_tracks_1_fault_and_1_message() {
     );
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -430,18 +403,11 @@ fn correctly_tracks_1_fault_and_1_message() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"foo"),
-                        Priority::Informational
-                    ),
-                    lines: 1,
-                    bytes: 5,
-                }])
-            },
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), Some(b"foo"), Priority::Informational),
+                lines: 1,
+                bytes: 5,
+            }]),
         }
     );
 }
@@ -561,7 +527,7 @@ fn correctly_tracks_10_same_service_messages() {
     ));
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -571,9 +537,7 @@ fn correctly_tracks_10_same_service_messages() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: expected_messages_ingested.into()
-            },
+            messages_ingested: ByteCountSnapshot::build(expected_messages_ingested),
         }
     );
 }
@@ -699,7 +663,7 @@ fn correctly_tracks_5_faults_and_10_same_service_messages() {
     ));
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -709,9 +673,7 @@ fn correctly_tracks_5_faults_and_10_same_service_messages() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: expected_messages_ingested.into()
-            },
+            messages_ingested: ByteCountSnapshot::build(expected_messages_ingested),
         }
     );
 }
@@ -979,7 +941,7 @@ fn correctly_tracks_500_faults_and_400_different_service_messages() {
     }
 
     assert_eq!(
-        STATE.snapshot(),
+        STATE.snapshot().unwrap(),
         PromSnapshot {
             entries_ingested: 0,
             fields_ingested: 0,
@@ -989,9 +951,7 @@ fn correctly_tracks_500_faults_and_400_different_service_messages() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: expected_messages_ingested.into()
-            },
+            messages_ingested: ByteCountSnapshot::build(expected_messages_ingested),
         }
     );
 }

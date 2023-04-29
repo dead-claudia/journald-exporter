@@ -16,7 +16,7 @@ fn encodes_empty_receive_key_set() {
 #[test]
 fn encodes_single_item_receive_key_set() {
     assert_eq!(
-        &*receive_key_set_bytes(KeySet::new(Box::new([Key::from_raw(b"0123456789ABCDEF")]))),
+        &*receive_key_set_bytes(KeySet::build([Key::from_raw(b"0123456789ABCDEF")])),
         &[
             0x01, // Operation ID
             0x01, // Key set length
@@ -178,7 +178,7 @@ fn encodes_max_len_receive_key_set() {
     ];
 
     assert_eq!(
-        &*receive_key_set_bytes(KeySet::new(Box::new(keys_to_add))),
+        &*receive_key_set_bytes(KeySet::build(keys_to_add)),
         &expected[..]
     );
 }

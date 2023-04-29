@@ -131,8 +131,8 @@ fn processes_partial_response_metrics() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: None,
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::None,
         }
     );
 }
@@ -153,8 +153,8 @@ fn processes_receive_metrics_zero_data_ingested_bytes() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: Some(Box::new([])),
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::Some(Box::new([])),
         }
     );
 }
@@ -178,8 +178,8 @@ fn processes_receive_metrics_1_byte_data_len_ingested() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: Some(Box::new(*b"0123456789ABCDEF")),
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::Some(Box::from(*b"0123456789ABCDEF")),
         }
     );
 }
@@ -190,7 +190,7 @@ fn processes_receive_metrics_2_byte_data_len_ingested() {
 
     const REQUEST_LENGTH: usize = 1000;
     let expected_hex = gen_hex(REQUEST_LENGTH);
-    let mut req = Vec::with_capacity(declarative_request![].len() + REQUEST_LENGTH + 9);
+    let mut req = Vec::new();
     write_slices(
         &mut req,
         &[
@@ -208,8 +208,8 @@ fn processes_receive_metrics_2_byte_data_len_ingested() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: Some(expected_hex),
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::Some(expected_hex),
         }
     );
 }
@@ -222,7 +222,7 @@ fn processes_receive_metrics_3_byte_data_len_ingested() {
 
     const REQUEST_LENGTH: usize = 200_000;
     let expected_hex = gen_hex(REQUEST_LENGTH);
-    let mut req = Vec::with_capacity(declarative_request![].len() + REQUEST_LENGTH + 9);
+    let mut req = Vec::new();
     write_slices(
         &mut req,
         &[
@@ -240,8 +240,8 @@ fn processes_receive_metrics_3_byte_data_len_ingested() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: Some(expected_hex),
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::Some(expected_hex),
         }
     );
 }
@@ -254,7 +254,7 @@ fn processes_receive_metrics_4_byte_data_len_ingested() {
 
     const REQUEST_LENGTH: usize = 50_000_000;
     let expected_hex = gen_hex(REQUEST_LENGTH);
-    let mut req = Vec::with_capacity(declarative_request![].len() + REQUEST_LENGTH + 9);
+    let mut req = Vec::new();
     write_slices(
         &mut req,
         &[
@@ -272,8 +272,8 @@ fn processes_receive_metrics_4_byte_data_len_ingested() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: Some(expected_hex),
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::Some(expected_hex),
         }
     );
 }
@@ -292,8 +292,8 @@ fn processes_partial_receive_key() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: None,
-            metrics: None,
+            key_set: ResponseItem::None,
+            metrics: ResponseItem::None,
         }
     );
 }
@@ -314,8 +314,8 @@ fn processes_empty_key_set() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: Some(Box::new([])),
-            metrics: None,
+            key_set: ResponseItem::Some(KeySet::empty()),
+            metrics: ResponseItem::None,
         }
     );
 }
@@ -340,8 +340,8 @@ fn processes_single_item_key_set() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: Some(Box::new([Key::from_raw(b"0123456789ABCDEF")])),
-            metrics: None,
+            key_set: ResponseItem::Some(KeySet::build([Key::from_raw(b"0123456789ABCDEF")])),
+            metrics: ResponseItem::None,
         }
     );
 }
@@ -504,8 +504,8 @@ fn processes_max_length_key_set() {
     assert_eq!(
         D.lock().take_response(),
         DecoderResponse {
-            key_set: Some(Box::new(expected_keys)),
-            metrics: None,
+            key_set: ResponseItem::Some(KeySet::build(expected_keys)),
+            metrics: ResponseItem::None,
         }
     );
 }

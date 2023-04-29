@@ -36,65 +36,22 @@ fn len_mismatch_fail(target_len: usize, source_len: usize) -> ! {
 }
 
 // Optimize for code size by merging everything into here. Also makes for some simpler code.
-pub fn write_slices(result: &mut Vec<u8>, slices: &[&[u8]]) {
-    let mut len = 0_usize;
+pub fn write_slices(result: &mut Vec<u8>, slices: &[&[u8]]) -> bool {
+    let len: usize = slices.iter().map(|s| s.len()).sum();
 
-    for slice in slices {
-        len = len.wrapping_add(slice.len());
-    }
-
-    result.reserve(len);
-
-    for slice in slices {
-        result.extend_from_slice(slice)
-    }
-}
-
-pub enum CowStr<'a> {
-    Borrowed(&'a str),
-    Owned(Box<str>),
-}
-
-impl<'a> CowStr<'a> {
-    pub fn into_owned(self) -> Box<str> {
-        match self {
-            CowStr::Borrowed(s) => s.into(),
-            CowStr::Owned(s) => s,
+    if result.try_reserve(len).is_err() {
+        false
+    } else {
+        for slice in slices {
+            result.extend_from_slice(slice);
         }
-    }
-
-    pub fn format(args: std::fmt::Arguments<'a>) -> CowStr<'a> {
-        match args.as_str() {
-            Some(s) => CowStr::Borrowed(s),
-            None => CowStr::Owned(args.to_string().into()),
-        }
+        true
     }
 }
 
-impl std::ops::Deref for CowStr<'_> {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        match self {
-            CowStr::Borrowed(s) => s,
-            CowStr::Owned(s) => s,
-        }
-    }
-}
-
-impl fmt::Debug for CowStr<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (**self).fmt(f)
-    }
-}
-
-impl fmt::Display for CowStr<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (**self).fmt(f)
-    }
-}
-
-impl PartialEq for CowStr<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        **self == **other
+pub fn format_cow(args: std::fmt::Arguments) -> Cow<str> {
+    match args.as_str() {
+        Some(s) => Cow::Borrowed(s),
+        None => Cow::Owned(args.to_string()),
     }
 }

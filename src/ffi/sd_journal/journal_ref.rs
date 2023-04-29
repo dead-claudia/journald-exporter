@@ -90,7 +90,10 @@ impl JournalRef for NativeJournalRef {
             )?;
 
             match NonNull::new(cursor.assume_init().cast_mut()) {
-                None => Err(err("`sd_journal_get_cursor` returned an empty pointer")),
+                None => Err(error!(
+                    ErrorKind::InvalidData,
+                    "`sd_journal_get_cursor` returned an empty pointer"
+                )),
                 Some(raw) => Ok(Cursor::from_raw(FixedCString::from_ptr(raw))),
             }
         }

@@ -62,12 +62,14 @@ impl RequestContext for TinyHttpRequestContext {
 
         let status = tiny_http::StatusCode(head.status);
 
-        fn single_header(header: &[u8], value: &[u8]) -> Vec<tiny_http::Header> {
-            Vec::from_iter([tiny_http::Header::from_bytes(header, value).unwrap()])
+        fn single_header(header: &[u8], value: &[u8]) -> Option<Vec<tiny_http::Header>> {
+            let mut result = try_new_dynamic_vec(1)?;
+            result.push(tiny_http::Header::from_bytes(header, value).unwrap());
+            Some(result)
         }
 
         let headers = match head.header_template {
-            ResponseHeaderTemplate::Empty => Vec::new(),
+            ResponseHeaderTemplate::Empty => Some(Vec::new()),
             ResponseHeaderTemplate::Metrics => {
                 single_header(b"content-type", b"application/openmetrics-text")
             }
@@ -76,6 +78,11 @@ impl RequestContext for TinyHttpRequestContext {
             }
             ResponseHeaderTemplate::MethodNotAllowed => single_header(b"allow", b"GET,HEAD"),
             ResponseHeaderTemplate::Disconnect => single_header(b"connection", b"close"),
+        };
+
+        let headers = match headers {
+            Some(headers) => headers,
+            None => std::panic::panic_any("Unable to allocate memory for headers!"),
         };
 
         let response = tiny_http::Response::new(status, headers, body, Some(body.len()), None);

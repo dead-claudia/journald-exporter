@@ -436,7 +436,7 @@ pub fn run_journal_loop<J: JournalRef>(
                     s.state().add_fault();
                     if matches!((&resume_cursor, prev_cursor), (Some(a), Some(b)) if a == &b) {
                         s.state().add_cursor_double_retry();
-                        return Err(err("Cursor read failed after 2 attempts."));
+                        return Err(error!("Cursor read failed after 2 attempts."));
                     }
 
                     if s.terminate_notify().has_notified() {

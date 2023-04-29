@@ -6,7 +6,7 @@ use crate::prelude::*;
 #[derive(Debug)]
 pub struct Channel<T, const N: usize> {
     closed: Notify,
-    checkpoint: Checkpoint<heapless::Vec<T, N>>,
+    checkpoint: Checkpoint<Option<Box<heapless::Vec<T, N>>>>,
 }
 
 pub struct ChannelCloseGuard<'a, T, const N: usize> {
@@ -23,7 +23,7 @@ impl<T, const N: usize> Channel<T, N> {
     pub const fn new() -> Self {
         Self {
             closed: Notify::new(),
-            checkpoint: Checkpoint::new(heapless::Vec::new()),
+            checkpoint: Checkpoint::new(None),
         }
     }
 
@@ -33,7 +33,10 @@ impl<T, const N: usize> Channel<T, N> {
 
     pub fn close(&self) {
         // Don't notify if it's already closed.
-        self.checkpoint.try_notify(|_| (self.closed.notify(), ()));
+        self.checkpoint.try_notify(|guard| {
+            *guard = None;
+            (self.closed.notify(), ())
+        });
     }
 
     pub fn has_closed(&self) -> bool {
@@ -45,37 +48,26 @@ impl<T, const N: usize> Channel<T, N> {
     }
 
     pub fn send(&self, value: T) -> Result<(), T> {
-        self.checkpoint.notify(|guard| guard.push(value))
+        self.checkpoint.notify(|guard| match guard {
+            Some(vec) => vec.push(value),
+            None => match try_new_fixed_vec() {
+                Some(vec) => guard.insert(vec).push(value),
+                None => Err(value),
+            },
+        })
     }
 
     /// This reads the whole internal buffer in a single go for simplicity
-    pub fn read_timeout(&self, timeout: Duration) -> Option<heapless::Vec<T, N>> {
-        if self.has_closed() {
-            return None;
-        }
-
+    pub fn read_timeout(&self, timeout: Duration) -> Option<Box<heapless::Vec<T, N>>> {
         let mut guard = self.checkpoint.lock();
 
-        if guard.is_empty() || self.has_closed() {
-            guard = self.checkpoint.resume_wait_for(timeout, guard);
-            if guard.is_empty() || self.has_closed() {
-                return None;
+        guard.take().or_else(|| {
+            if self.has_closed() {
+                None
+            } else {
+                self.checkpoint.resume_wait_for(timeout, guard).take()
             }
-        }
-
-        Some(replace(&mut *guard, heapless::Vec::new()))
-    }
-}
-
-struct RefCount {
-    value: AtomicU32,
-}
-
-impl fmt::Debug for RefCount {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // See Boost's explainer for why this uses `Ordering::Acquire`:
-        // https://www.boost.org/doc/libs/1_55_0/doc/html/atomic/usage_examples.html
-        self.value.load(Ordering::Acquire).fmt(f)
+        })
     }
 }
 
@@ -88,7 +80,7 @@ mod tests {
     type TestVec = heapless::Vec<usize, TEST_CAPACITY>;
 
     #[track_caller]
-    fn receive_concurrent(channel: &TestChannel, joined: &Notify) -> Option<TestVec> {
+    fn receive_concurrent(channel: &TestChannel, joined: &Notify) -> Option<Box<TestVec>> {
         loop {
             match channel.read_timeout(Duration::from_millis(10)) {
                 Some(v) => break Some(v),
@@ -108,13 +100,13 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter([123]))
+            Some(Box::new(TestVec::from_iter([123])))
         );
 
         assert_eq!(CHANNEL.send(456), Ok(()));
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter([456]))
+            Some(Box::new(TestVec::from_iter([456])))
         );
     }
 
@@ -129,14 +121,14 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter([123, 456]))
+            Some(Box::new(TestVec::from_iter([123, 456])))
         );
 
         assert_eq!(CHANNEL.send(555), Ok(()));
         assert_eq!(CHANNEL.send(222), Ok(()));
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter([555, 222]))
+            Some(Box::new(TestVec::from_iter([555, 222])))
         );
     }
 
@@ -153,7 +145,7 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter(1..=TEST_CAPACITY))
+            Some(Box::new(TestVec::from_iter(1..=TEST_CAPACITY)))
         );
 
         assert_eq!(CHANNEL.read_timeout(Duration::ZERO), None);
@@ -230,7 +222,7 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::from_secs(1)),
-            Some(TestVec::from_iter([123]))
+            Some(Box::new(TestVec::from_iter([123])))
         );
 
         NEXT_CHECKPOINT.resume();
@@ -239,7 +231,7 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter([456]))
+            Some(Box::new(TestVec::from_iter([456])))
         );
         assert_eq!(CHANNEL.read_timeout(Duration::ZERO), None);
     }
@@ -283,7 +275,7 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::from_secs(1)),
-            Some(TestVec::from_iter([123, 456]))
+            Some(Box::new(TestVec::from_iter([123, 456])))
         );
 
         NEXT_CHECKPOINT.resume();
@@ -292,7 +284,7 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::ZERO),
-            Some(TestVec::from_iter([555, 222]))
+            Some(Box::new(TestVec::from_iter([555, 222])))
         );
         assert_eq!(CHANNEL.read_timeout(Duration::ZERO), None);
     }
@@ -335,7 +327,7 @@ mod tests {
 
         assert_eq!(
             CHANNEL.read_timeout(Duration::from_secs(1)),
-            Some(TestVec::from_iter(1..=TEST_CAPACITY))
+            Some(Box::new(TestVec::from_iter(1..=TEST_CAPACITY)))
         );
 
         NEXT_CHECKPOINT.resume();
@@ -436,7 +428,7 @@ mod tests {
         let v =
             receive_concurrent(&CHANNEL, &JOINED).expect("Thread joined without emitting data!");
 
-        assert_eq!(v, TestVec::from_iter([123]));
+        assert_eq!(v, Box::new(TestVec::from_iter([123])));
 
         handle.join().unwrap();
 
@@ -495,14 +487,14 @@ mod tests {
             };
 
             if v.len() > 1 {
-                assert_eq!(v, TestVec::from_iter([first, second]));
+                assert_eq!(v, Box::new(TestVec::from_iter([first, second])));
             } else {
-                assert_eq!(v, TestVec::from_iter([first]));
+                assert_eq!(v, Box::new(TestVec::from_iter([first])));
                 let v = match receive_concurrent(&CHANNEL, &JOINED) {
                     Some(v) => v,
                     None => return false,
                 };
-                assert_eq!(v, TestVec::from_iter([second]));
+                assert_eq!(v, Box::new(TestVec::from_iter([second])));
             }
 
             true

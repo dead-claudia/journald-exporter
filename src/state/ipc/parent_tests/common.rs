@@ -6,9 +6,9 @@ pub const fn index_hex(value: usize) -> u8 {
 }
 
 pub fn gen_hex(len: usize) -> Box<[u8]> {
-    let mut result = vec![0; len];
-    for (i, target) in result.iter_mut().enumerate() {
-        *target = index_hex(i);
+    let mut result = Vec::new();
+    for i in 0..len {
+        result.push(index_hex(i));
     }
     result.into()
 }

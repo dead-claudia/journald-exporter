@@ -8,25 +8,24 @@ use super::common::*;
 
 pub const METRICS_RESPONSE_HEADER: &[u8] = &[0x00, 0, 0, 0, 0];
 
-pub fn finish_response_metrics(mut buf: Vec<u8>) -> Box<[u8]> {
+pub fn finish_response_metrics(buf: &mut [u8]) {
     let len = buf.len().checked_sub(5).expect("buffer not initialized");
     let [a, b, c, d] = truncate_usize_u32(len).to_le_bytes();
     buf[1] = a;
     buf[2] = b;
     buf[3] = c;
     buf[4] = d;
-    buf.into()
 }
 
 pub fn receive_key_set_bytes(key_set: KeySet) -> Box<[u8]> {
     let key_set = key_set.into_insecure_view_keys();
-    assert!(key_set.len() <= zero_extend_u8_usize(u8::MAX));
-    let mut buf = Vec::with_capacity(key_set.len().wrapping_mul(MAX_KEY_LEN));
+    debug_assert!(key_set.len() <= zero_extend_u8_usize(u8::MAX));
+    let mut buf = Vec::new();
     buf.extend_from_slice(&[0x01, truncate_usize_u8(key_set.len())]);
 
     for key in key_set.iter() {
         let key_value = key.insecure_get_value();
-        assert!(key_value.len() <= zero_extend_u8_usize(u8::MAX));
+        debug_assert!(key_value.len() <= zero_extend_u8_usize(u8::MAX));
         // It's okay to wrap - it can't be zero.
         buf.push(truncate_usize_u8(key_value.len().wrapping_sub(1)));
         buf.extend_from_slice(key.insecure_get_value());
@@ -46,17 +45,32 @@ enum DecoderState {
     ReceiveKeySetExpectKey,
 }
 
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseItem<T> {
+    None,
+    AllocationFailed,
+    Some(T),
+}
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct DecoderResponse {
-    pub key_set: Option<Box<[Key]>>,
-    pub metrics: Option<Box<[u8]>>,
+    pub key_set: ResponseItem<KeySet>,
+    pub metrics: ResponseItem<Box<[u8]>>,
 }
 
 impl fmt::Debug for DecoderResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DecoderResponse")
             .field("key_set", &self.key_set)
-            .field("metrics", &self.metrics.as_deref().map(BinaryToDebug))
+            .field(
+                "metrics",
+                &match &self.metrics {
+                    ResponseItem::None => ResponseItem::None,
+                    ResponseItem::AllocationFailed => ResponseItem::AllocationFailed,
+                    ResponseItem::Some(vec) => ResponseItem::Some(BinaryToDebug(vec)),
+                },
+            )
             .finish()
     }
 }
@@ -84,8 +98,20 @@ impl Decoder {
 
     pub fn take_response(&mut self) -> DecoderResponse {
         DecoderResponse {
-            key_set: self.key_set_response.take().map(|r| r.finish()),
-            metrics: self.metrics_response.take().map(|r| r.finish()),
+            key_set: match self.key_set_response.take() {
+                None => ResponseItem::None,
+                Some(response) => match response.finish() {
+                    None => ResponseItem::AllocationFailed,
+                    Some(key_set) => ResponseItem::Some(KeySet::new(key_set)),
+                },
+            },
+            metrics: match self.metrics_response.take() {
+                None => ResponseItem::None,
+                Some(response) => match response.finish() {
+                    None => ResponseItem::AllocationFailed,
+                    Some(metrics_data) => ResponseItem::Some(metrics_data),
+                },
+            },
         }
     }
 

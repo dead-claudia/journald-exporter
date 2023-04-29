@@ -14,6 +14,7 @@ pub use test_prelude::*;
 pub use crate::common::*;
 pub use crate::ffi::normalize_errno;
 pub use crate::state::*;
+pub use std::borrow::Cow;
 pub use std::fmt;
 pub use std::fmt::Write as _;
 pub use std::io;

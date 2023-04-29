@@ -11,25 +11,90 @@ pub struct ByteCountSnapshotEntry {
     pub bytes: u64,
 }
 
+// `repr(C)` to ensure the order's well-defined.
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ByteCountTableEntrySnapshot {
+    pub lines: u64,
+    pub bytes: u64,
+    pub key: ByteCountTableKey,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct ByteCountSnapshot {
-    pub data: Box<[ByteCountSnapshotEntry]>,
+    // The last entry of "priority" 8 is the fallback.
+    priority_table: [Box<[ByteCountTableEntrySnapshot]>; 8],
 }
 
 impl ByteCountSnapshot {
     #[cfg(test)]
     pub fn empty() -> Self {
-        Self { data: Box::new([]) }
+        Self {
+            priority_table: [
+                Box::new([]),
+                Box::new([]),
+                Box::new([]),
+                Box::new([]),
+                Box::new([]),
+                Box::new([]),
+                Box::new([]),
+                Box::new([]),
+            ],
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.priority_table.iter().all(|t| t.is_empty())
+    }
+
+    pub fn each_while(
+        &self,
+        mut receiver: impl FnMut(Priority, &ByteCountTableEntrySnapshot) -> bool,
+    ) -> bool {
+        for (i, table) in self.priority_table.iter().enumerate() {
+            let priority = Priority::from_severity_index(truncate_usize_u8(i)).unwrap();
+            for item in &**table {
+                if !receiver(priority, item) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    #[cfg(test)]
+    pub fn build(data: impl IntoIterator<Item = ByteCountSnapshotEntry>) -> Self {
+        let mut result = [
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ];
+        for item in data {
+            let priority_index = zero_extend_u8_usize(item.key.priority.as_severity_index());
+            let entry = ByteCountTableEntrySnapshot {
+                key: item.key.table_key,
+                lines: item.lines,
+                bytes: item.bytes,
+            };
+            result[priority_index].push(entry);
+        }
+
+        Self {
+            priority_table: result.map(Box::from),
+        }
     }
 }
 
-struct ByteCountData {
+// `repr(C)` to ensure the order's well-defined.
+#[repr(C)]
+struct ByteCountTableEntry {
     lines: Counter,
     bytes: Counter,
-}
-
-struct ByteCountTableEntry {
-    data: ByteCountData,
     key: ByteCountTableKey,
 }
 
@@ -54,33 +119,82 @@ impl ByteCountMap {
         }
     }
 
-    pub fn snapshot(&self) -> ByteCountSnapshot {
-        // This is just a speculative size estimate. It's very unlikely to be wrong, since keys are
-        // very rarely added. (Also why I'm not bothering to make this fully wait-free via `mmap`.)
-        let mut size = 0_usize;
-        for entry in self.priority_table.iter() {
-            let read_lock = entry.read().unwrap_or_else(|e| e.into_inner());
-            size = size.saturating_add(read_lock.len());
-        }
-        let mut result = Vec::with_capacity(size);
-        for (i, entry) in self.priority_table.iter().enumerate() {
-            let priority = Priority::from_severity_index(truncate_usize_u8(i)).unwrap();
-            let read_lock = entry.read().unwrap_or_else(|e| e.into_inner());
-            for ByteCountTableEntry { key, data } in read_lock.iter() {
-                result.push(ByteCountSnapshotEntry {
-                    key: MessageKey::copy_from_table_entry(priority, key),
-                    lines: data.lines.current(),
-                    bytes: data.bytes.current(),
-                });
+    pub fn snapshot(&self) -> Option<ByteCountSnapshot> {
+        // Empty boxes are cheap - they don't actually allocate.
+        let mut priority_table: [Box<[ByteCountTableEntrySnapshot]>; 8] = [
+            Box::new([]),
+            Box::new([]),
+            Box::new([]),
+            Box::new([]),
+            Box::new([]),
+            Box::new([]),
+            Box::new([]),
+            Box::new([]),
+        ];
+
+        for (snapshot, table) in priority_table.iter_mut().zip(&self.priority_table) {
+            let table_lock = table.read().unwrap_or_else(|e| e.into_inner());
+
+            // The idea is this:
+            // 1. Bulk copy the whole thing. This is a simple `alloc` + `memcpy` - it's cheap.
+            // 2. Copy the atomic loads. Will be a relatively tight loop, but less cache-friendly.
+            // 3. Since it's now initialized, reinterpret it as needed. (This part requires almost
+            //    no compute, and also doesn't need the guard.)
+
+            // SAFETY: It's okay to copy the whole thing at first - the atomics can be garbage at
+            // first. The atomics will be initialized after with proper atomic instructions.
+            unsafe {
+                use std::alloc::*;
+
+                let len = table_lock.len();
+                // If the length is zero, an empty box is desired. (Also, it'll cause memory bugs
+                // if I don't special-case this.)
+                if len == 0 {
+                    continue;
+                }
+
+                let ptr = table_lock.as_ptr();
+
+                let layout = match Layout::array::<ByteCountTableEntrySnapshot>(len) {
+                    Ok(layout) => layout,
+                    Err(_) => return None,
+                };
+
+                let byte_ptr = alloc(layout);
+                if byte_ptr.is_null() {
+                    return None;
+                }
+
+                std::ptr::copy_nonoverlapping(ptr.cast(), byte_ptr, layout.size());
+
+                let result_ptr: *mut ByteCountTableEntrySnapshot = byte_ptr.cast();
+
+                for (i, entry) in table_lock.iter().enumerate() {
+                    let bytes = entry.bytes.current();
+                    let lines = entry.lines.current();
+                    let target = result_ptr.add(i);
+                    std::ptr::write(std::ptr::addr_of_mut!((*target).bytes), bytes);
+                    std::ptr::write(std::ptr::addr_of_mut!((*target).lines), lines);
+                }
+
+                let result = Box::from_raw(std::ptr::slice_from_raw_parts_mut(result_ptr, len));
+
+                drop(table_lock);
+
+                *snapshot = result;
             }
         }
-        let mut data: Box<[_]> = result.into();
-        data.sort_by(|a, b| a.key.cmp(&b.key));
-        ByteCountSnapshot { data }
+
+        // To ensure there's a defined order for a much easier time testing.
+        for snapshot in &mut priority_table {
+            snapshot.sort_by(|a, b| a.key.cmp(&b.key));
+        }
+
+        Some(ByteCountSnapshot { priority_table })
     }
 
     // Take a reference to avoid a copy.
-    pub fn push_line(&self, key: &MessageKey, msg_len: usize) {
+    pub fn push_line(&self, key: &MessageKey, msg_len: usize) -> bool {
         // Services are very rarely added. Try opening a read first and doing atomic updates, and
         // fall back to a write lock if the entry doesn't exist yet. Contention should already be
         // low as-is since only two threads could be accessing the map, and it's further reduced by
@@ -92,11 +206,14 @@ impl ByteCountMap {
             .read()
             .unwrap_or_else(|e| e.into_inner());
 
-        if !find_and_increment(&read_lock, key, msg_len) {
-            // Don't deadlock. Drop the lock before entering the fallback path.
-            drop(read_lock);
-            push_line_likely_new(&self.priority_table[priority_index], key, msg_len);
+        if find_and_increment(&read_lock, key, msg_len) {
+            return true;
         }
+
+        // Don't deadlock. Drop the lock before entering the fallback path.
+        drop(read_lock);
+
+        return push_line_likely_new(&self.priority_table[priority_index], key, msg_len);
 
         fn find_and_increment(
             entries: &[ByteCountTableEntry],
@@ -105,9 +222,9 @@ impl ByteCountMap {
         ) -> bool {
             match entries.iter().find(|entry| entry.key == key.table_key) {
                 None => false,
-                Some(ByteCountTableEntry { data, .. }) => {
-                    data.lines.increment();
-                    data.bytes.increment_by(zero_extend_usize_u64(msg_len));
+                Some(entry) => {
+                    entry.lines.increment();
+                    entry.bytes.increment_by(zero_extend_usize_u64(msg_len));
                     true
                 }
             }
@@ -130,7 +247,7 @@ impl ByteCountMap {
             priority_entry: &RwLock<Vec<ByteCountTableEntry>>,
             key: &MessageKey,
             msg_len: usize,
-        ) {
+        ) -> bool {
             // Entry doesn't exist. Time to acquire a write lock and update the hash map with a
             // possible new key.
             let mut write_lock = priority_entry.write().unwrap_or_else(|e| e.into_inner());
@@ -145,14 +262,22 @@ impl ByteCountMap {
                 #[allow(clippy::clone_on_copy)]
                 let table_key = key.table_key.clone();
 
-                write_lock.push(ByteCountTableEntry {
-                    data: ByteCountData {
-                        lines: Counter::new(1),
-                        bytes: Counter::new(zero_extend_usize_u64(msg_len)),
-                    },
+                let entry = ByteCountTableEntry {
+                    lines: Counter::new(1),
+                    bytes: Counter::new(zero_extend_usize_u64(msg_len)),
                     key: table_key,
-                });
+                };
+
+                // Just error. It's not fatal, just results in table state issues.
+                if let Err(e) = write_lock.try_reserve(1) {
+                    log::error!("Failed to push new table entry: {}", e);
+                    return false;
+                }
+
+                write_lock.push(entry);
             }
+
+            true
         }
     }
 }
@@ -166,7 +291,7 @@ mod tests {
     }
 
     fn actual_snapshot(s: &'static PromState) -> PromSnapshot {
-        s.snapshot()
+        s.snapshot().unwrap()
     }
 
     #[test]
@@ -179,7 +304,7 @@ mod tests {
         S.add_message_line_ingested(&map_key(b"three"), 555);
         S.add_message_line_ingested(&map_key(b"three"), 444);
 
-        const EXPECTED_DATA: [ByteCountSnapshotEntry; 3] = [
+        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &[
             ByteCountSnapshotEntry {
                 key: map_key(b"one"),
                 lines: 2,
@@ -208,9 +333,7 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: EXPECTED_DATA.into(),
-                },
+                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
             }
         );
     }
@@ -335,9 +458,7 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: EXPECTED_DATA.into(),
-                },
+                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
             }
         );
     }
@@ -440,9 +561,7 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot {
-                    data: EXPECTED_DATA.into(),
-                },
+                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
             }
         );
     }

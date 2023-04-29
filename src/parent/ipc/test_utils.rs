@@ -39,7 +39,8 @@ impl fmt::Debug for ExpectedSpawnResult {
 
 pub static EXIT_STATUS_TERMINATED: IpcExitStatus = IpcExitStatus {
     result: Some(ExitResult::Signal(Signal::SIGTERM)),
-    errors: Vec::new(),
+    parent_error: None,
+    child_wait_error: None,
 };
 
 #[must_use = "This type must be retained for the duration that the child stdin should be kept open."]

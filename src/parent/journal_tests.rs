@@ -34,7 +34,7 @@ impl TestState {
     }
 
     fn snapshot(&'static self) -> PromSnapshot {
-        self.state.state().snapshot()
+        self.state.state().snapshot().unwrap()
     }
 
     #[track_caller]
@@ -434,18 +434,16 @@ fn pushes_entry_then_aborts_on_wait_error() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 1,
-                    bytes: 9,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 1,
+                bytes: 9,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -495,18 +493,16 @@ fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 1,
-                    bytes: 0,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 1,
+                bytes: 0,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -592,13 +588,11 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
             unreadable_fields: 2,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(Some(123), Some(123), None, Priority::Warning),
-                    lines: 4,
-                    bytes: 28,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(Some(123), Some(123), None, Priority::Warning),
+                lines: 4,
+                bytes: 28,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -684,18 +678,16 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
             unreadable_fields: 2,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Debug
-                    ),
-                    lines: 4,
-                    bytes: 28,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Debug
+                ),
+                lines: 4,
+                bytes: 28,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -747,18 +739,16 @@ fn processes_invalid_priority_then_aborts_on_wait_error() {
             unreadable_fields: 1,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Emergency
-                    ),
-                    lines: 1,
-                    bytes: 7,
-                }],)
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Emergency
+                ),
+                lines: 1,
+                bytes: 7,
+            }],)
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -844,18 +834,16 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
             unreadable_fields: 2,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        None,
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 4,
-                    bytes: 28,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    None,
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 4,
+                bytes: 28,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -943,18 +931,16 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
             unreadable_fields: 3,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        None,
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 4,
-                    bytes: 28,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    None,
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 4,
+                bytes: 28,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1040,18 +1026,16 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
             unreadable_fields: 2,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        None,
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 4,
-                    bytes: 28,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    None,
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 4,
+                bytes: 28,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1139,18 +1123,16 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
             unreadable_fields: 3,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        None,
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 4,
-                    bytes: 28,
-                }])
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    None,
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 4,
+                bytes: 28,
+            }])
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1236,18 +1218,16 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
             unreadable_fields: 2,
             corrupted_fields: 1,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([ByteCountSnapshotEntry {
-                    key: MessageKey::build(
-                        Some(123),
-                        Some(123),
-                        Some(b"my-service.service"),
-                        Priority::Warning
-                    ),
-                    lines: 4,
-                    bytes: 0,
-                }],)
-            }
+            messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                key: MessageKey::build(
+                    Some(123),
+                    Some(123),
+                    Some(b"my-service.service"),
+                    Priority::Warning
+                ),
+                lines: 4,
+                bytes: 0,
+            }],)
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1321,30 +1301,28 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot {
-                data: Box::new([
-                    ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(123),
-                            Some(456),
-                            Some(b"my-service.service"),
-                            Priority::Warning
-                        ),
-                        lines: 2,
-                        bytes: 22,
-                    },
-                    ByteCountSnapshotEntry {
-                        key: MessageKey::build(
-                            Some(456),
-                            Some(123),
-                            Some(b"my-service.service"),
-                            Priority::Informational
-                        ),
-                        lines: 1,
-                        bytes: 11,
-                    },
-                ])
-            }
+            messages_ingested: ByteCountSnapshot::build([
+                ByteCountSnapshotEntry {
+                    key: MessageKey::build(
+                        Some(123),
+                        Some(456),
+                        Some(b"my-service.service"),
+                        Priority::Warning
+                    ),
+                    lines: 2,
+                    bytes: 22,
+                },
+                ByteCountSnapshotEntry {
+                    key: MessageKey::build(
+                        Some(456),
+                        Some(123),
+                        Some(b"my-service.service"),
+                        Priority::Informational
+                    ),
+                    lines: 1,
+                    bytes: 11,
+                },
+            ])
         },
     );
     T.provider.assert_no_calls_remaining();

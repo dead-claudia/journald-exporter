@@ -2,12 +2,13 @@ use crate::prelude::*;
 
 use super::*;
 
-fn render_with_created(snapshot: &PromSnapshot, seconds: u64, millis: u32) -> Box<[u8]> {
+fn render_with_created(snapshot: &PromSnapshot, seconds: u64, millis: u32) -> Vec<u8> {
     render_openapi_metrics(
         &PromEnvironment::new(mock_system_time(seconds, millis)),
         snapshot,
         &get_user_group_table(),
     )
+    .unwrap()
 }
 
 struct Template {
@@ -31,28 +32,23 @@ impl Template {
 
 // Get this noise out. Also gets tedious editing the length every time I want to add an entry or
 // modify an existing one.
-fn assert_snapshot_eq(actual: Box<[u8]>, template: &'static Template, joiner: &[u8]) {
+fn assert_snapshot_eq(actual: Vec<u8>, template: &'static Template, joiner: &[u8]) {
     // This is optimized somewhat to try to speed up Miri in one of the slowest parts. Won't make
     // literally any difference for the standard `cargo test`.
 
     let expected_len = (template.parts.len() - 1) * joiner.len() + template.data_len;
-    let mut real_expected: Box<[u8]> = vec![0; expected_len + 5].into();
+    let mut real_expected = Vec::new();
 
-    copy_to_start(
-        &mut real_expected[1..],
-        &truncate_usize_u32(expected_len).to_le_bytes(),
-    );
+    real_expected.push(0);
+    real_expected.extend_from_slice(&truncate_usize_u32(expected_len).to_le_bytes());
 
-    let mut target = 5;
     let mut has_previous = false;
 
     for part in template.parts {
         if has_previous {
-            copy_to_start(&mut real_expected[target..], joiner);
-            target += joiner.len();
+            real_expected.extend_from_slice(joiner);
         }
-        copy_to_start(&mut real_expected[target..], part);
-        target += part.len();
+        real_expected.extend_from_slice(part);
         has_previous = true;
     }
 
@@ -115,7 +111,7 @@ journald_messages_ingested_bytes_total 0
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+            messages_ingested: ByteCountSnapshot::empty(),
         },
         123,
         456,
@@ -303,7 +299,7 @@ journald_messages_ingested_bytes_total 0
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot { data: Box::new([]) },
+            messages_ingested: ByteCountSnapshot::empty(),
         },
         secs,
         millis,
