@@ -59,10 +59,9 @@ pub enum PriorityParseError {
 impl Priority {
     pub fn from_severity_value(s: &[u8]) -> Result<Priority, PriorityParseError> {
         match *s {
-            // SAFETY: The `Priority` enum specifically represents a contiguous range from 0 to 7
-            // inclusive, and the ASCII digit range is just this shifted over by a constant amount
-            // (in this case, 0x30, but the specific number is irrelevant here.)
-            [b @ b'0'..=b'7'] => Ok(unsafe { std::mem::transmute(b.wrapping_sub(b'0')) }),
+            [b @ b'0'..=b'7'] => {
+                Self::from_severity_index(b.wrapping_sub(b'0')).ok_or(PriorityParseError::Invalid)
+            }
             [] => Err(PriorityParseError::Empty),
             _ => Err(PriorityParseError::Invalid),
         }
