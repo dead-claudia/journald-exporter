@@ -4,7 +4,9 @@ use super::ipc::*;
 use super::journal::run_journal_loop;
 use super::key_watcher::run_watcher;
 use crate::cli::args::ParentArgs;
+use crate::cli::args::TLSOptions;
 use crate::ffi::*;
+use crate::parent::key_watcher::KeyWatcherTarget;
 use const_str::cstr;
 use std::time::SystemTime;
 
@@ -18,8 +20,7 @@ struct WaitState {
 
 static NATIVE_JOURNALD_PROVIDER: OnceCell<NativeSystemdProvider> = OnceCell::new();
 
-static IPC_STATE: ParentIpcState<NativeIpcMethods> =
-    ParentIpcState::new("/proc/self/exe", NativeIpcMethods::new());
+static IPC_STATE: ParentIpcState<NativeIpcMethods> = ParentIpcState::new(NativeIpcMethods::new());
 
 pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
     check_parent_uid_gid()?;
@@ -31,14 +32,45 @@ pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
     let _notify_guard = IPC_STATE.terminate_notify().create_guard();
     let _notify_guard = IPC_STATE.done_notify().create_guard();
 
-    IPC_STATE.init_dynamic(
+    IPC_STATE.init_dynamic(ParentIpcDynamic {
+        port: args.port,
         child_user_group,
-        Box::new(["--child-process".into(), args.port.to_string().into()]),
-        PromEnvironment::new(SystemTime::now()),
-        args.key_dir,
-    );
+        prom_environment: PromEnvironment::new(SystemTime::now()),
+        key_target: KeyWatcherTarget::new(args.key_dir),
+        tls_config: load_tls_config(args.tls)?,
+    });
 
     resolve_parent_return()
+}
+
+fn load_tls_file(path: &std::path::Path) -> io::Result<Box<std::ffi::OsStr>> {
+    use std::os::unix::prelude::OsStringExt;
+
+    match std::fs::read(path) {
+        Ok(data) => Ok(std::ffi::OsString::from_vec(data).into()),
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            Err(error!(ErrorKind::NotFound, "{} not found.", path.display()))
+        }
+        Err(e) => Err(error!(
+            "An error occurred while loading {}: {}.",
+            path.display(),
+            normalize_errno(e, Some("open"))
+        )),
+    }
+}
+
+fn load_tls_config(tls: Option<TLSOptions>) -> io::Result<Option<TLSConfig>> {
+    match tls {
+        None => Ok(None),
+        Some(tls) => {
+            let config = TLSConfig {
+                certificate: load_tls_file(&tls.certificate)?,
+                private_key: load_tls_file(&tls.private_key)?,
+            };
+            log::info!("TLS config loaded.");
+            Ok(Some(config))
+        }
+    }
 }
 
 fn check_parent_uid_gid() -> io::Result<()> {
@@ -88,12 +120,11 @@ fn resolve_parent_return() -> io::Result<ExitResult> {
         }
     }
 
-    fn parent_ipc_task() -> ThreadTask {
-        Box::new(move || {
-            let mut task_guard = ParentIpcTaskGuard(None);
-            task_guard.0 = Some(parent_ipc()?);
-            Ok(())
-        })
+    fn parent_ipc_task() -> io::Result<()> {
+        let mut task_guard = ParentIpcTaskGuard(None);
+        log::info!("Parent IPC setup started.");
+        task_guard.0 = Some(parent_ipc()?);
+        Ok(())
     }
 
     struct BackgroundTaskGuard;
@@ -106,26 +137,21 @@ fn resolve_parent_return() -> io::Result<ExitResult> {
         }
     }
 
-    fn journal_task() -> ThreadTask {
-        Box::new(move || {
-            let _task_guard = BackgroundTaskGuard;
-            run_journal_loop::<NativeJournalRef>(
-                &IPC_STATE,
-                NATIVE_JOURNALD_PROVIDER.get().unwrap(),
-            )
-        })
+    fn journal_task() -> io::Result<()> {
+        let _task_guard = BackgroundTaskGuard;
+        log::info!("Journal iteration started.");
+        run_journal_loop::<NativeJournalRef>(&IPC_STATE, NATIVE_JOURNALD_PROVIDER.get().unwrap())
     }
 
-    fn key_updater_task() -> ThreadTask {
-        Box::new(move || {
-            let _task_guard = BackgroundTaskGuard;
-            run_watcher(&IPC_STATE)
-        })
+    fn key_updater_task() -> io::Result<()> {
+        let _task_guard = BackgroundTaskGuard;
+        log::info!("Key watcher started.");
+        run_watcher(&IPC_STATE)
     }
 
-    let parent_ipc_handle = ThreadHandle::spawn(parent_ipc_task());
-    let journal_handle = ThreadHandle::spawn(journal_task());
-    let key_updater_handle = ThreadHandle::spawn(key_updater_task());
+    let parent_ipc_handle = ThreadHandle::spawn(parent_ipc_task);
+    let journal_handle = ThreadHandle::spawn(journal_task);
+    let key_updater_handle = ThreadHandle::spawn(key_updater_task);
 
     static READY_MSG: &std::ffi::CStr = cstr!("READY=1");
 
@@ -166,6 +192,7 @@ pub fn parent_ipc() -> io::Result<ExitResult> {
                 }
 
                 let _stdin_guard = DropStdin;
+                log::info!("Child spawned.");
                 resume = Some(Ok(spawn_ipc_and_wait_for_child_exit(child_output)));
             }
             ChildSpawnResult::Err(e) => resume = Some(Err(e)),
@@ -177,8 +204,9 @@ pub fn parent_ipc() -> io::Result<ExitResult> {
 fn ipc_message_loop_task(
     child_output: std::process::ChildStdout,
     child_exited: Arc<Notify>,
-) -> ThreadTask {
-    Box::new(move || {
+) -> impl FnOnce() -> io::Result<()> + Send {
+    move || {
+        log::info!("Parent IPC ready.");
         let guard = IPC_STATE.done_notify().create_guard();
         let result = ipc_message_loop(child_output, &IPC_STATE);
         drop(guard);
@@ -186,7 +214,7 @@ fn ipc_message_loop_task(
             IPC_STATE.methods().child_terminate()?;
         }
         result
-    })
+    }
 }
 
 fn spawn_ipc_and_wait_for_child_exit(child_output: std::process::ChildStdout) -> IpcExitStatus {

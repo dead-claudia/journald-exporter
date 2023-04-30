@@ -16,20 +16,13 @@ You can find instructions on how to install that [here](https://www.rust-lang.or
 
 ## E2E testing
 
-First, before you run the E2E tests, you'll need to set up a `journald-exporter` system account, or the service will fail to start. No home directory needed.
+First, before you run the E2E tests, run `./scripts/e2e-setup.sh`. This will set up all the stuff needed, including:
 
-```sh
-useradd --system --user-group journald-exporter
-```
+- The certificate and private key needed for testing HTTPS
+- A `journald-exporter` system account, without a home directory
+- A test API key
 
-The end to end tests are written using Node.js. They have been verified to run in fairly recent Node 16.x, but should work in the latest version as well.
-
-Why Node and not a Bash script? Few reasons:
-
-1. There's a lot less room for error with process management. For one, Node automatically kills and waits on child processes, avoiding a pain point with the Bash script that led to debuggability issues.
-2. Node's timers and native HTTP support allow me to only wrangle one child process, not three, and I can fit everything into a single file.
-3. All in all, it comes out to a file that's only about 50% larger, yet I can do everything I want at a low level.
-4. I'm familiar with Node, and that of course saves a lot of time.
+The tests are all written in a decently-sized Bash script you can run via `./scripts/e2e.sh`. It's assumed you have, in addition to the obvious systemd, curl and OpenSSL installed as well as a non-ancient Bash.
 
 ## Process isolation
 

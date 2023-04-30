@@ -207,7 +207,7 @@ fn plus_port_number_for_child_returns_success() {
     assert_eq!(
         parse_args(&["journald-exporter", "--child-process", "+123"]),
         Ok(Args::Child(ChildArgs {
-            port: NonZeroU16::new(123).unwrap()
+            port: NonZeroU16::new(123).unwrap(),
         }))
     );
 }
@@ -217,7 +217,7 @@ fn unsigned_port_number_for_child_returns_success() {
     assert_eq!(
         parse_args(&["journald-exporter", "--child-process", "123"]),
         Ok(Args::Child(ChildArgs {
-            port: NonZeroU16::new(123).unwrap()
+            port: NonZeroU16::new(123).unwrap(),
         }))
     );
 }
@@ -367,6 +367,7 @@ fn plus_port_number_key_dir_ending_in_colon_returns_success() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("blah:"),
+                    tls: None,
                 })),
                 "{p} then {k}"
             );
@@ -375,6 +376,7 @@ fn plus_port_number_key_dir_ending_in_colon_returns_success() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("blah:"),
+                    tls: None,
                 })),
                 "{k} then {p}"
             );
@@ -409,6 +411,7 @@ fn plus_port_number_with_file_ending_in_colon_returns_success() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("blah:"),
+                    tls: None,
                 })),
                 "{p} then {k}"
             );
@@ -417,6 +420,7 @@ fn plus_port_number_with_file_ending_in_colon_returns_success() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("blah:"),
+                    tls: None,
                 })),
                 "{k} then {p}"
             );
@@ -433,6 +437,7 @@ fn plus_port_number_with_file_with_special_chars_returns_success() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("b/l@a!h:"),
+                    tls: None,
                 })),
                 "{p} then {k}"
             );
@@ -441,6 +446,7 @@ fn plus_port_number_with_file_with_special_chars_returns_success() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("b/l@a!h:"),
+                    tls: None,
                 })),
                 "{k} then {p}"
             );
@@ -457,6 +463,7 @@ fn plus_port_number_with_normal_key_dir_path_returns_parent() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("some/file"),
+                    tls: None,
                 })),
                 "{p} then {k}"
             );
@@ -465,6 +472,7 @@ fn plus_port_number_with_normal_key_dir_path_returns_parent() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("some/file"),
+                    tls: None,
                 })),
                 "{k} then {p}"
             );
@@ -481,6 +489,7 @@ fn unsigned_non_zero_port_number_returns_parent() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("some/file"),
+                    tls: None,
                 })),
                 "{p} then {k}"
             );
@@ -489,6 +498,7 @@ fn unsigned_non_zero_port_number_returns_parent() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(123).unwrap(),
                     key_dir: PathBuf::from("some/file"),
+                    tls: None,
                 })),
                 "{k} then {p}"
             );
@@ -505,6 +515,7 @@ fn unsigned_16_bit_port_number_returns_parent() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(12345).unwrap(),
                     key_dir: PathBuf::from("some/file"),
+                    tls: None,
                 })),
                 "{p} then {k}"
             );
@@ -513,6 +524,7 @@ fn unsigned_16_bit_port_number_returns_parent() {
                 Ok(Args::Parent(ParentArgs {
                     port: NonZeroU16::new(12345).unwrap(),
                     key_dir: PathBuf::from("some/file"),
+                    tls: None,
                 })),
                 "{k} then {p}"
             );
@@ -759,3 +771,125 @@ fn unsigned_16_bit_port_number_with_file_and_unknown_third_arg_fails_with_unknow
         }
     }
 }
+
+#[test]
+#[ignore]
+fn certificate_arg_requires_value() {
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "-c",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "-c"
+    );
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "--certificate",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "--certificate"
+    );
+}
+
+#[test]
+#[ignore]
+fn certificate_arg_requires_private_key_arg() {
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "-c",
+            "some/cert.pem",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "-c"
+    );
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "--certificate",
+            "some/cert.pem",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "--certificate"
+    );
+}
+
+#[test]
+#[ignore]
+fn private_key_arg_requires_value() {
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "-K",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "-K"
+    );
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "--private-key",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "--private-key"
+    );
+}
+
+#[test]
+#[ignore]
+fn private_key_arg_requires_certificate_arg() {
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "-K",
+            "some/key.pem",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "-K"
+    );
+    assert_eq!(
+        parse_args(&[
+            "journald-exporter",
+            "--port",
+            "12345",
+            "--key-dir",
+            "some/file",
+            "--private-key",
+            "some/key.pem",
+        ]),
+        Err(ArgsError::MissingPrivateKey),
+        "--private-key"
+    );
+}
+
+// TODO: add more certificate arg tests

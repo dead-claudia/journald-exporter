@@ -176,23 +176,25 @@ mod tests {
     use crate::ffi::current_uid;
     use crate::ffi::ExitCode;
     use crate::ffi::ExitResult;
+    use crate::parent::key_watcher::KeyWatcherTarget;
 
     fn init_mock_ipc_dynamic(s: &'static ParentIpcState<FakeIpcChildHandle>) {
-        s.init_dynamic(
-            UserGroup {
+        s.init_dynamic(ParentIpcDynamic {
+            port: std::num::NonZeroU16::new(1).unwrap(),
+            child_user_group: UserGroup {
                 uid: current_uid(),
                 gid: current_gid(),
             },
-            Box::new([]),
-            PromEnvironment::new(mock_system_time(123, 456)),
-            std::path::PathBuf::new(),
-        );
+            prom_environment: PromEnvironment::new(mock_system_time(123, 456)),
+            key_target: KeyWatcherTarget::new(std::path::PathBuf::new()),
+            tls_config: None,
+        });
     }
 
     #[test]
     fn spawn_child_ok_works() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
 
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
@@ -239,7 +241,7 @@ mod tests {
     #[test]
     fn spawn_child_join_fail_works() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
@@ -285,7 +287,7 @@ mod tests {
     #[test]
     fn spawn_child_spawn_fail_works() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
 
         S.methods().child_spawn.enqueue_io(Err(libc::ENOENT));
@@ -301,7 +303,7 @@ mod tests {
     #[test]
     fn spawn_child_handles_input_close() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
@@ -339,7 +341,7 @@ mod tests {
     #[test]
     fn spawn_child_handles_write() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
@@ -379,7 +381,7 @@ mod tests {
     #[test]
     fn spawn_child_enqueues_read_ok() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
@@ -423,7 +425,7 @@ mod tests {
     #[test]
     fn spawn_child_output_enqueues_read_error() {
         static S: ParentIpcState<FakeIpcChildHandle> =
-            ParentIpcState::new("command", FakeIpcChildHandle::new());
+            ParentIpcState::new(FakeIpcChildHandle::new());
         init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 

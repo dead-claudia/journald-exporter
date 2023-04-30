@@ -19,7 +19,23 @@ pub struct NativeSystemdProvider {
 
 impl SystemdProvider for NativeSystemdProvider {
     fn watchdog_notify(&'static self) -> io::Result<()> {
-        self.sd_notify(WATCHDOG_MSG)
+        if self.watchdog_usec != SystemdMonotonicUsec(0) {
+            let next: SystemdMonotonicUsec = self.get_monotonic_time_usec();
+
+            // Easier to use a mutex. It's almost never contended, so shouldn't be an issue in
+            // practice.
+            {
+                let mut prev = self.last_watchdog.lock().unwrap_or_else(|e| e.into_inner());
+                if prev.0 >= next.0 {
+                    return Ok(());
+                }
+                prev.0 = next.0.wrapping_add(self.watchdog_usec.0);
+            }
+
+            self.sd_notify(WATCHDOG_MSG)
+        } else {
+            Ok(())
+        }
     }
 
     fn boot_id(&self) -> &Id128 {
@@ -81,33 +97,19 @@ impl NativeSystemdProvider {
     }
 
     pub fn sd_notify(&'static self, msg: &CStr) -> io::Result<()> {
-        if self.watchdog_usec != SystemdMonotonicUsec(0) {
-            if cfg!(miri) {
-                return Err(Error::from_raw_os_error(libc::ENOTCONN));
-            }
-
-            let next: SystemdMonotonicUsec = self.get_monotonic_time_usec();
-
-            // Easier to use a mutex. It's almost never contended, so shouldn't be an issue in
-            // practice.
-            {
-                let mut prev = self.last_watchdog.lock().unwrap_or_else(|e| e.into_inner());
-                if prev.0 >= next.0 {
-                    return Ok(());
-                }
-                prev.0 = next.0.wrapping_add(self.watchdog_usec.0);
-            }
-
-            // SAFETY: It's just invoking the native systemd function, and invariants are upheld via the
-            // function's type.
-            let result = sd_check("sd_notify", unsafe { daemon::sd_notify(0, msg.as_ptr()) })?;
-
-            if result == 0 {
-                return Err(Error::from_raw_os_error(libc::ENOTCONN));
-            }
+        if cfg!(miri) {
+            return Err(Error::from_raw_os_error(libc::ENOTCONN));
         }
 
-        Ok(())
+        // SAFETY: It's just invoking the native systemd function, and invariants are upheld via the
+        // function's type.
+        let result = sd_check("sd_notify", unsafe { daemon::sd_notify(0, msg.as_ptr()) })?;
+
+        if result == 0 {
+            Err(Error::from_raw_os_error(libc::ENOTCONN))
+        } else {
+            Ok(())
+        }
     }
 }
 

@@ -194,7 +194,7 @@ mod tests {
         static NEXT_CHECKPOINT: ThreadCheckpoint = ThreadCheckpoint::new();
         static CHANNEL: TestChannel = Channel::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let guard = CHANNEL.close_guard();
             if !START_CHECKPOINT.try_wait() {
                 return Ok(());
@@ -208,7 +208,7 @@ mod tests {
             #[allow(clippy::mem_forget)]
             std::mem::forget(guard);
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = NEXT_CHECKPOINT.drop_guard();
@@ -243,7 +243,7 @@ mod tests {
         static NEXT_CHECKPOINT: ThreadCheckpoint = ThreadCheckpoint::new();
         static CHANNEL: TestChannel = Channel::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let guard = CHANNEL.close_guard();
             let _guard = START_RESUME.drop_guard();
             if !START_CHECKPOINT.try_wait() {
@@ -260,7 +260,7 @@ mod tests {
             #[allow(clippy::mem_forget)]
             std::mem::forget(guard);
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = NEXT_CHECKPOINT.drop_guard();
@@ -296,7 +296,7 @@ mod tests {
         static NEXT_CHECKPOINT: ThreadCheckpoint = ThreadCheckpoint::new();
         static CHANNEL: TestChannel = Channel::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let channel_guard = CHANNEL.close_guard();
             let resume_guard = START_RESUME.drop_guard();
             if !START_CHECKPOINT.try_wait() {
@@ -312,7 +312,7 @@ mod tests {
             }
             drop(channel_guard);
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = NEXT_CHECKPOINT.drop_guard();
@@ -342,7 +342,7 @@ mod tests {
         static START_CHECKPOINT: ThreadCheckpoint = ThreadCheckpoint::new();
         static CHANNEL: TestChannel = Channel::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let _guard = CHANNEL.close_guard();
             if !START_CHECKPOINT.try_wait() {
                 return Ok(());
@@ -352,7 +352,7 @@ mod tests {
             }
             assert_eq!(CHANNEL.send(555), Err(555));
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = CHANNEL.close_guard();
@@ -371,14 +371,14 @@ mod tests {
         static START_CHECKPOINT: ThreadCheckpoint = ThreadCheckpoint::new();
         static CHANNEL: TestChannel = Channel::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let channel_guard = CHANNEL.close_guard();
             if !START_CHECKPOINT.try_wait() {
                 return Ok(());
             }
             drop(channel_guard);
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = CHANNEL.close_guard();
@@ -402,7 +402,7 @@ mod tests {
         static CHANNEL: TestChannel = Channel::new();
         static JOINED: Notify = Notify::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let _guard = JOINED.create_guard();
             let _guard = CHANNEL.close_guard();
             if !START_CHECKPOINT.try_wait() {
@@ -415,7 +415,7 @@ mod tests {
             // Sleep 100 milliseconds to give the final assertion time to run before joining.
             std::thread::sleep(Duration::from_millis(100));
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = CHANNEL.close_guard();
@@ -444,7 +444,7 @@ mod tests {
         static CHANNEL: TestChannel = Channel::new();
         static JOINED: Notify = Notify::new();
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let _guard = JOINED.create_guard();
             let _guard = CHANNEL.close_guard();
             if !START_CHECKPOINT.try_wait() {
@@ -465,7 +465,7 @@ mod tests {
             // Sleep 100 milliseconds to give the final assertion time to run before joining.
             std::thread::sleep(Duration::from_millis(100));
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = NEXT_CHECKPOINT.drop_guard();
@@ -528,7 +528,7 @@ mod tests {
 
         const MESSAGE_COUNT: usize = 10000;
 
-        let handle = ThreadHandle::spawn(Box::new(move || {
+        let handle = ThreadHandle::spawn(move || {
             let _guard = CHANNEL.close_guard();
             let _guard = NEXT_RESUME.drop_guard();
 
@@ -558,7 +558,7 @@ mod tests {
             }
 
             Ok(())
-        }));
+        });
 
         let _guard = START_CHECKPOINT.drop_guard();
         let _guard = NEXT_CHECKPOINT.drop_guard();
@@ -635,7 +635,7 @@ mod tests {
         static CHANNEL: TestChannel = Channel::new();
         static JOINED: Notify = Notify::new();
 
-        let _handle = ThreadHandle::spawn(Box::new(move || {
+        let _handle = ThreadHandle::spawn(move || {
             let _guard = JOINED.create_guard();
             let channel_guard = CHANNEL.close_guard();
             if !START_CHECKPOINT.try_wait() {
@@ -650,7 +650,7 @@ mod tests {
             // Sleep 100 milliseconds to let the below loop detect closure.
             std::thread::sleep(Duration::from_millis(100));
             Ok(())
-        }));
+        });
 
         let _guard = CHANNEL.close_guard();
 

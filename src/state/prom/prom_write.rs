@@ -17,7 +17,7 @@ pub struct PromSnapshot {
 }
 
 // Max integer: 18446744073709551616
-pub(super) const MAX_USIZE_ASCII_BYTES: usize = 20;
+pub const MAX_USIZE_ASCII_BYTES: usize = 20;
 const CREATED_MILLIS_SIZE: usize = 4;
 const CREATED_BUFFER_SIZE: usize = match MAX_USIZE_ASCII_BYTES.checked_add(CREATED_MILLIS_SIZE) {
     Some(size) => size,
@@ -50,8 +50,8 @@ fn split_created_buffer(
     }
 }
 
-// Returns the start offset. The end offset is always implicitly the end.
-fn write_u64(target: &mut [u8; MAX_USIZE_ASCII_BYTES], mut value: u64) -> usize {
+/// Returns the start offset. The end offset is always implicitly the end.
+pub fn write_u64(target: &mut [u8; MAX_USIZE_ASCII_BYTES], mut value: u64) -> usize {
     // This serializes a `usize` without needing to allocate anything.
 
     // Special case that's easier to handle outside the main loop. This needs handled specially

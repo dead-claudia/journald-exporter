@@ -35,7 +35,7 @@ fn try_handle_metrics_request(
 ) -> io::Result<Vec<u8>> {
     let table = s.methods().get_user_group_table()?;
     if let Some(snapshot) = s.state().snapshot() {
-        let environment = s.dynamic().prom_environment();
+        let environment = &s.dynamic().prom_environment;
         if let Some(result) = render_openapi_metrics(environment, &snapshot, &table) {
             return Ok(result);
         }

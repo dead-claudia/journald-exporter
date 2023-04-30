@@ -7,22 +7,16 @@ use crate::prelude::*;
 
 use std::thread::JoinHandle;
 
-pub type ThreadTask = Box<dyn FnOnce() -> io::Result<()> + Send>;
-
 pub struct ThreadHandle(Option<JoinHandle<io::Result<()>>>);
 
 impl ThreadHandle {
     // Reduce the polymorphism involved here by accepting a boxed closure instead.
-    pub fn spawn(init: ThreadTask) -> Self {
+    pub fn spawn(init: impl FnOnce() -> io::Result<()> + Send + 'static) -> Self {
         Self(Some(std::thread::spawn(init)))
     }
 
     pub fn join(mut self) -> io::Result<()> {
-        let Some(inner) = self.0.take() else {
-            unreachable!();
-        };
-
-        match inner.join() {
+        match self.0.take().unwrap().join() {
             Ok(result) => result,
             Err(e) => std::panic::resume_unwind(e),
         }

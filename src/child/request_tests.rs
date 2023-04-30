@@ -599,11 +599,11 @@ fn resume_request(
 
     let child_ipc_terminate_handle = {
         let terminate_notify = terminate_notify.clone();
-        ThreadHandle::spawn(Box::new(move || {
+        ThreadHandle::spawn(move || {
             std::thread::sleep(Duration::from_millis(10));
             terminate_notify.notify();
             Ok(())
-        }))
+        })
     };
 
     child_ipc(state, ipc_recv, terminate_notify)?;

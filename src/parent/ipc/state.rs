@@ -2,37 +2,25 @@ use crate::prelude::*;
 
 use super::ParentIpcMethods;
 use crate::parent::key_watcher::KeyWatcherTarget;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::num::NonZeroU16;
 
-pub struct ParentIpcDynamic {
-    child_user_group: UserGroup,
-    args: Box<[Box<str>]>,
-    prom_environment: PromEnvironment,
-    key_target: KeyWatcherTarget,
+pub struct TLSConfig {
+    pub certificate: Box<OsStr>,
+    pub private_key: Box<OsStr>,
 }
 
-impl ParentIpcDynamic {
-    pub fn child_user_group(&'static self) -> &'static UserGroup {
-        &self.child_user_group
-    }
-
-    pub fn args(&'static self) -> &'static [Box<str>] {
-        &self.args
-    }
-
-    pub fn prom_environment(&'static self) -> &'static PromEnvironment {
-        &self.prom_environment
-    }
-
-    pub fn key_target(&'static self) -> &'static KeyWatcherTarget {
-        &self.key_target
-    }
+pub struct ParentIpcDynamic {
+    pub port: NonZeroU16,
+    pub child_user_group: UserGroup,
+    pub prom_environment: PromEnvironment,
+    pub key_target: KeyWatcherTarget,
+    pub tls_config: Option<TLSConfig>,
 }
 
 pub struct ParentIpcState<M: ParentIpcMethods> {
     dynamic: OnceCell<ParentIpcDynamic>,
     state: PromState,
-    command: &'static str,
     methods: M,
     terminate_notify: Notify,
     done_notify: Notify,
@@ -41,11 +29,10 @@ pub struct ParentIpcState<M: ParentIpcMethods> {
 }
 
 impl<M: ParentIpcMethods> ParentIpcState<M> {
-    pub const fn new(command: &'static str, methods: M) -> ParentIpcState<M> {
+    pub const fn new(methods: M) -> ParentIpcState<M> {
         ParentIpcState {
             dynamic: OnceCell::new(),
             state: PromState::new(),
-            command,
             methods,
             terminate_notify: Notify::new(),
             done_notify: Notify::new(),
@@ -67,20 +54,7 @@ impl<M: ParentIpcMethods> ParentIpcState<M> {
     }
 
     #[cold]
-    pub fn init_dynamic(
-        &'static self,
-        child_user_group: UserGroup,
-        args: Box<[Box<str>]>,
-        prom_environment: PromEnvironment,
-        key_dir: PathBuf,
-    ) {
-        let dynamic = ParentIpcDynamic {
-            child_user_group,
-            args,
-            prom_environment,
-            key_target: KeyWatcherTarget::new(key_dir),
-        };
-
+    pub fn init_dynamic(&'static self, dynamic: ParentIpcDynamic) {
         if self.dynamic.set(dynamic).is_err() {
             panic!("State already initialized.");
         }
@@ -88,10 +62,6 @@ impl<M: ParentIpcMethods> ParentIpcState<M> {
 
     pub fn state(&'static self) -> &'static PromState {
         &self.state
-    }
-
-    pub fn command(&'static self) -> &'static str {
-        self.command
     }
 
     pub fn decoder(&'static self) -> &'static Uncontended<ipc::child::Decoder> {
