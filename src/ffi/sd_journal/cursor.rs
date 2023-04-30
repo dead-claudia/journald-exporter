@@ -6,7 +6,8 @@ use crate::prelude::*;
 // The docs specify cursors as opaque C strings. `systemd` should've just exposed these as a
 // `free`able struct instance.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Clone))]
 pub struct Cursor(FixedCString);
 
 impl Cursor {

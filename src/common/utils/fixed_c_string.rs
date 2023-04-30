@@ -12,8 +12,7 @@ unsafe impl Send for FixedCString {}
 // SAFETY: This is safe as it's effectively constant and it's still memory-managed.
 unsafe impl Sync for FixedCString {}
 
-#[cold]
-#[inline(never)]
+#[cfg(test)]
 fn allocation_failure() -> ! {
     panic!("allocation failure");
 }
@@ -126,6 +125,7 @@ impl Drop for FixedCString {
     }
 }
 
+#[cfg(test)]
 impl Clone for FixedCString {
     fn clone(&self) -> Self {
         // SAFETY: asserts memory is allocated. `data` is verified to not contain nulls.
