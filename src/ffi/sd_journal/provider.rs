@@ -58,21 +58,17 @@ impl NativeSystemdProvider {
     pub fn open_provider() -> io::Result<NativeSystemdProvider> {
         let boot_id = Id128::get_from_boot()?;
 
-        let watchdog_enabled = match sd_check(
-            "sd_watchdog_enabled",
-            // SAFETY: It's just invoking the native systemd function, and invariants are upheld via
-            // the function's type.
-            unsafe {
-                if cfg!(miri) {
-                    0
-                } else {
-                    daemon::sd_watchdog_enabled(0, std::ptr::null_mut())
+        let watchdog_enabled = !cfg!(miri) && {
+            // SAFETY: It's just invoking the native systemd function, and nothing here accesses
+            // any Rust-visible memory.
+            match sd_check("sd_watchdog_enabled", unsafe {
+                daemon::sd_watchdog_enabled(0, std::ptr::null_mut())
+            }) {
+                Ok(result) => result != 0,
+                Err(_) => {
+                    std::panic::panic_any("`WATCHDOG_USEC` and/or `WATCHDOG_PID` are invalid")
                 }
-            },
-        ) {
-            Ok(0) => false,
-            Ok(_) => true,
-            Err(_) => panic!("`WATCHDOG_USEC` and/or `WATCHDOG_PID` are invalid"),
+            }
         };
 
         Ok(NativeSystemdProvider::new(watchdog_enabled, boot_id))
