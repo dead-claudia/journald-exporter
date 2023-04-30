@@ -21,15 +21,6 @@ static NATIVE_JOURNALD_PROVIDER: OnceCell<NativeSystemdProvider> = OnceCell::new
 static IPC_STATE: ParentIpcState<NativeIpcMethods> =
     ParentIpcState::new("/proc/self/exe", NativeIpcMethods::new());
 
-struct NotifyGuard;
-
-impl Drop for NotifyGuard {
-    fn drop(&mut self) {
-        IPC_STATE.terminate_notify().notify();
-        IPC_STATE.done_notify().notify();
-    }
-}
-
 pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
     check_parent_uid_gid()?;
     let child_user_group = get_child_uid_gid()?;
@@ -37,7 +28,8 @@ pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
 
     NATIVE_JOURNALD_PROVIDER.get_or_init(|| provider);
 
-    let _notify_guard = NotifyGuard;
+    let _notify_guard = IPC_STATE.terminate_notify().create_guard();
+    let _notify_guard = IPC_STATE.done_notify().create_guard();
 
     IPC_STATE.init_dynamic(
         child_user_group,
