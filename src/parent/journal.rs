@@ -297,7 +297,12 @@ impl<M: ParentIpcMethods> MessageReader<M> {
     }
 }
 
-const FORCE_REPORT_INTERVAL_ENTRIES: usize = 1000;
+// 5 minutes is more than enough to process 100k+ entries, considering that many entries *per
+// second* is more realistic. At 100k entries per second, that's 30M entries within 5 minutes.
+// Also, this limit is only applied when no wait is needed, and it'd take a *lot* of throughput
+// to even get that far. (I'm not even sure systemd can even saturate the code enough to even hit
+// a small fraction of this before the next wait on most machines.)
+const FORCE_REPORT_INTERVAL_ENTRIES: usize = 100_000;
 
 // Don't inline, as I want to be able to track its existence better in assembly and profiles, and
 // in practice, only the inner loop *here* is actually hot.
@@ -353,8 +358,6 @@ fn run_loop_inner<J: JournalRef>(
     }
 
     loop {
-        let mut watchdog_counter = WatchdogCounter::<FORCE_REPORT_INTERVAL_ENTRIES>::new();
-
         if s.terminate_notify().has_notified() {
             return Ok(());
         }
@@ -363,6 +366,8 @@ fn run_loop_inner<J: JournalRef>(
             if s.terminate_notify().has_notified() {
                 return Ok(());
             }
+
+            let mut watchdog_counter = WatchdogCounter::<FORCE_REPORT_INTERVAL_ENTRIES>::new();
 
             while journal.next()? {
                 if s.terminate_notify().has_notified() {
