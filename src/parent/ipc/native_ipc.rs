@@ -2,6 +2,7 @@ use crate::prelude::*;
 
 use super::*;
 use crate::ffi::PidFd;
+use std::os::unix::prelude::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::process::Stdio;
 use std::time::SystemTime;
@@ -42,26 +43,16 @@ struct UserGroupTableCacheEntry {
     last_updated: SystemTime,
 }
 
-const USER_GROUP_READ_SIZE: usize = 4096;
-
-struct UserGroupTableCache {
-    entry: Option<UserGroupTableCacheEntry>,
-    buf: [u8; USER_GROUP_READ_SIZE],
-}
-
 pub struct NativeIpcMethods {
     child_state: Mutex<Option<PidFd>>,
-    user_group_table_cache: Uncontended<UserGroupTableCache>,
+    user_group_table_cache: Uncontended<Option<UserGroupTableCacheEntry>>,
 }
 
 impl NativeIpcMethods {
     pub const fn new() -> NativeIpcMethods {
         NativeIpcMethods {
             child_state: Mutex::new(None),
-            user_group_table_cache: Uncontended::new(UserGroupTableCache {
-                entry: None,
-                buf: [0; 4096],
-            }),
+            user_group_table_cache: Uncontended::new(None),
         }
     }
 }
@@ -83,7 +74,7 @@ impl ParentIpcMethods for NativeIpcMethods {
         // period of time.
         let mut guard = self.user_group_table_cache.lock();
 
-        if let Some(entry) = &guard.entry {
+        if let Some(entry) = &*guard {
             if Instant::now() < entry.expiry {
                 return Ok(entry.table.clone());
             }
@@ -96,7 +87,7 @@ impl ParentIpcMethods for NativeIpcMethods {
         let gid_updated = gid_file.metadata()?.modified()?;
         let last_updated = uid_updated.max(gid_updated);
 
-        if let Some(entry) = &mut guard.entry {
+        if let Some(entry) = &mut *guard {
             if last_updated == entry.last_updated {
                 entry.last_updated = last_updated;
                 entry.expiry = Instant::now() + USER_GROUP_REFRESH_RATE;
@@ -104,10 +95,13 @@ impl ParentIpcMethods for NativeIpcMethods {
             }
         }
 
-        fn read_file(mut file: std::fs::File, buf: &mut [u8]) -> io::Result<IdTable> {
+        fn read_file(mut file: std::fs::File) -> io::Result<IdTable> {
+            // This is enough buffer for about anything realistic.
+            let mut buf = [0; 4096];
+
             let mut parser = PasswdGroupParser::new();
             loop {
-                let len = file.read(buf)?;
+                let len = file.read(&mut buf)?;
                 if len == 0 {
                     break;
                 }
@@ -118,12 +112,12 @@ impl ParentIpcMethods for NativeIpcMethods {
             Ok(parser.extract())
         }
 
-        let uid_table = read_file(uid_file, &mut guard.buf)?;
-        let gid_table = read_file(gid_file, &mut guard.buf)?;
+        let uid_table = read_file(uid_file)?;
+        let gid_table = read_file(gid_file)?;
 
         let table = Arc::new(UidGidTable::new(uid_table, gid_table));
 
-        guard.entry = Some(UserGroupTableCacheEntry {
+        *guard = Some(UserGroupTableCacheEntry {
             table: table.clone(),
             expiry: Instant::now() + USER_GROUP_REFRESH_RATE,
             last_updated,
@@ -140,16 +134,28 @@ impl ParentIpcMethods for NativeIpcMethods {
         // `.pidfd()` once https://github.com/rust-lang/rust/issues/82971 gets stabilized. In
         // particular, this is technically racy as the `PidFd` is added after spawning, and
         // fixing that is non-trivial and requires some temporary Unix sockets to coordinate.
-        let mut command = std::process::Command::new(ipc_state.command());
+        let mut command = std::process::Command::new("/proc/self/exe");
 
         let ipc_dynamic = ipc_state.dynamic();
 
-        command.args(ipc_state.dynamic().args().iter().map(|arg| &**arg));
+        let mut port_bytes = [0; MAX_USIZE_ASCII_BYTES];
+        let port_bytes_start = write_u64(
+            &mut port_bytes,
+            zero_extend_u16_u64(ipc_dynamic.port.into()),
+        );
+
+        command.arg("--child-process");
+        command.arg(std::ffi::OsStr::from_bytes(&port_bytes[port_bytes_start..]));
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::inherit());
-        command.uid(ipc_dynamic.child_user_group().uid);
-        command.gid(ipc_dynamic.child_user_group().gid);
+        command.uid(ipc_dynamic.child_user_group.uid);
+        command.gid(ipc_dynamic.child_user_group.gid);
+
+        if let Some(tls_options) = &ipc_dynamic.tls_config {
+            command.env("TLS_CERTIFICATE", &tls_options.certificate);
+            command.env("TLS_PRIVATE_KEY", &tls_options.private_key);
+        }
 
         let mut child = command.spawn()?;
         drop(command);

@@ -18,6 +18,10 @@ pub const fn zero_extend_u8_usize(value: u8) -> usize {
     value as usize
 }
 
+pub const fn zero_extend_u16_u64(value: u16) -> u64 {
+    value as u64
+}
+
 pub const fn zero_extend_u16_usize(value: u16) -> usize {
     value as usize
 }

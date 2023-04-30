@@ -9,10 +9,19 @@ use notify::Watcher;
 use std::os::unix::prelude::MetadataExt;
 use std::os::unix::prelude::OsStrExt;
 use std::os::unix::prelude::PermissionsExt;
+use std::path::Path;
 use std::path::PathBuf;
 
 pub struct KeyWatcherTarget {
     key_dir: PathBuf,
+}
+
+fn add_path(e: Error, path: &Path) -> Error {
+    let kind = e.kind();
+    let mut result = normalize_errno(e, None).to_string();
+    result.push_str(", path: ");
+    write!(&mut result, "{}", path.display()).unwrap();
+    Error::new(kind, result)
 }
 
 impl KeyWatcherTarget {
@@ -30,19 +39,38 @@ impl KeyWatcherTarget {
         }
 
         if perms_are_insecure(&dir_metadata) {
-            return Err(report_insecure(&self.key_dir, dir_metadata));
+            return Err(report_insecure(dir_metadata));
         }
 
-        for entry in std::fs::read_dir(&self.key_dir)? {
+        let read_dir = match std::fs::read_dir(&self.key_dir) {
+            Ok(result) => result,
+            Err(e) => return Err(add_path(e, &self.key_dir)),
+        };
+
+        for entry in read_dir {
             let entry = entry?;
-            match process_path(entry) {
-                Ok(key) => next.push(key),
+
+            // Only show the immediate path in test as it's only seeing a temporary directory, but
+            // show everything in release for easier debugging.
+            let file_name = {
+                if cfg!(test) {
+                    entry.file_name().into()
+                } else {
+                    entry.path()
+                }
+            };
+
+            match process_path(&entry) {
+                Ok(key) => {
+                    log::info!("API key detected at path: {}", file_name.display());
+                    next.push(key);
+                }
                 // Tolerate it. May have just been removed right after the threshold.
                 Err(e) if e.kind() == ErrorKind::NotFound => {}
                 // Log it and silently ignore it. Easier to debug and less intrusive overall, and
                 // also by side effect plugs a potential DoS hole in case arbitrary files get added
                 // to it by a non-root process.
-                Err(e) => log::error!("Key watcher error: {}", &normalize_errno(e, None)),
+                Err(e) => log::error!("Key watcher error: {}", &add_path(e, &file_name)),
             }
         }
 
@@ -52,12 +80,14 @@ impl KeyWatcherTarget {
 
 #[must_use]
 pub fn write_current_key_set(s: &'static ParentIpcState<impl ParentIpcMethods>) -> bool {
-    match s.dynamic().key_target().get_current_key_set() {
+    log::info!("Retrieving key set.");
+    let key_target = &s.dynamic().key_target;
+    match key_target.get_current_key_set() {
         // If it's terminating, it's pointless to report errors here. Also suppresses a bunch of
         // useless error logs in the tests.
         Err(_) if s.child_input().is_none() => false,
         Err(e) => {
-            log::error!("Key watcher error: {}", &normalize_errno(e, None));
+            log::error!("Key watcher error: {}", &add_path(e, &key_target.key_dir));
             // Just in case something changed in the meantime.
             s.child_input().is_none()
         }
@@ -148,45 +178,26 @@ fn insecure_message(metadata: std::fs::Metadata) -> &'static str {
     }
 }
 
-// Only show the immediate path in test as it's only seeing a temporary directory, but show
-// everything in release for easier debugging.
-fn resolve_file_name(entry: std::fs::DirEntry) -> std::path::PathBuf {
-    if cfg!(test) {
-        entry.file_name().into()
-    } else {
-        entry.path()
-    }
-}
-
 #[cold]
-fn report_insecure(path: &std::path::Path, metadata: std::fs::Metadata) -> Error {
+fn report_insecure(metadata: std::fs::Metadata) -> Error {
     error!(
         ErrorKind::InvalidData,
-        "{} has insecure permissions: {}",
-        path.display(),
+        "Insecure permissions detected: {}",
         insecure_message(metadata),
     )
 }
 
-fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
+fn process_path(entry: &std::fs::DirEntry) -> io::Result<Key> {
     let metadata = entry.metadata()?;
 
     if !metadata.file_type().is_file() {
-        return Err(error!(
-            ErrorKind::InvalidInput,
-            "{} is not a file",
-            resolve_file_name(entry).display()
-        ));
+        return Err(error!("File not a regular file"));
     }
 
     // Make polymorphic based on the current user. Easier to clean up that way in test, and in prod
     // it always checks against the root user anyways.
     if metadata.uid() != current_uid() {
-        return Err(error!(
-            ErrorKind::InvalidData,
-            "{} is not owned by the root user",
-            resolve_file_name(entry).display()
-        ));
+        return Err(error!("File owned by non-root user"));
     }
 
     fn perms_are_insecure(metadata: &std::fs::Metadata) -> bool {
@@ -194,17 +205,12 @@ fn process_path(entry: std::fs::DirEntry) -> io::Result<Key> {
     }
 
     if perms_are_insecure(&metadata) {
-        return Err(report_insecure(&resolve_file_name(entry), metadata));
+        return Err(report_insecure(metadata));
     }
 
     let key_data = std::fs::read_to_string(entry.path())?;
-    Key::from_hex(key_data.trim().as_bytes()).ok_or_else(|| {
-        error!(
-            ErrorKind::InvalidData,
-            "{} does not contain a valid key",
-            resolve_file_name(entry).display()
-        )
-    })
+    Key::from_hex(key_data.trim().as_bytes())
+        .ok_or_else(|| error!("File contents are not a valid key"))
 }
 
 fn is_update_event(event: &notify::Event) -> bool {
@@ -296,7 +302,7 @@ pub fn run_watcher(s: &'static ParentIpcState<impl ParentIpcMethods>) -> io::Res
 
     notify_watcher
         .watch(
-            &s.dynamic().key_target().key_dir,
+            &s.dynamic().key_target.key_dir,
             notify::RecursiveMode::NonRecursive,
         )
         .map_err(to_io_error)?;
@@ -327,9 +333,12 @@ pub fn run_watcher(s: &'static ParentIpcState<impl ParentIpcMethods>) -> io::Res
 
         drop(guard);
 
-        fn report_errors(errors: &[notify::Error]) {
+        fn report_errors(errors: Vec<notify::Error>) {
             for e in errors {
-                log::error!("Key watcher error: {e}");
+                log::error!(
+                    "Key watcher error: {}",
+                    normalize_errno(to_io_error(e), None)
+                );
             }
         }
 
@@ -340,21 +349,21 @@ pub fn run_watcher(s: &'static ParentIpcState<impl ParentIpcMethods>) -> io::Res
                 }
             }
             EventState::Error(errors) => {
-                report_errors(&errors);
+                report_errors(errors);
                 if replace(&mut has_update, false) && !write_current_key_set(s) {
                     break;
                 }
             }
             EventState::Event => has_update = true,
             EventState::ErrorAndEvent(errors) => {
-                report_errors(&errors);
+                report_errors(errors);
                 has_update = true;
             }
             // Watcher dropped or some other error occurred.
             EventState::Drop => break,
             // Watcher dropped or some other error occurred.
             EventState::ErrorAndDrop(errors) => {
-                report_errors(&errors);
+                report_errors(errors);
                 break;
             }
             // Checked for earlier.
@@ -376,6 +385,7 @@ mod tests {
 
     struct TestKeyState {
         start_checkpoint: ThreadCheckpoint,
+        resume_checkpoint: ThreadCheckpoint,
         static_state: StaticState,
     }
 
@@ -432,6 +442,7 @@ mod tests {
         const fn new() -> Self {
             Self {
                 start_checkpoint: ThreadCheckpoint::new(),
+                resume_checkpoint: ThreadCheckpoint::new(),
                 static_state: StaticState::new(),
             }
         }
@@ -447,7 +458,10 @@ mod tests {
             // Spawn before creating the guard so the guard gets dropped first, but synchronize on a
             // checkpoint to ensure it's actually registered first.
             let watcher_handle = guard.spawn(Box::new(|| {
+                let _resume_guard = self.resume_checkpoint.drop_guard();
+                // There's some setup that needs to occur first.
                 if self.start_checkpoint.try_wait() {
+                    self.resume_checkpoint.resume();
                     run_watcher(&self.static_state.state)
                 } else {
                     Ok(())
@@ -458,6 +472,11 @@ mod tests {
             self.static_state
                 .init_test_state_with_key_dir(key_dir.path().to_owned());
             self.start_checkpoint.resume();
+            if !self.resume_checkpoint.try_wait() {
+                drop(watcher_guard);
+                watcher_handle.join().unwrap();
+                unreachable!("Watcher handle was expected to panic.");
+            }
 
             // Wait for the listener to get registered.
             std::thread::sleep(Duration::from_millis(250));
@@ -473,10 +492,11 @@ mod tests {
     struct TestManipulate {
         state: [TestKeyState; 3],
         index: AtomicUsize,
+        logs: &'static [&'static str],
     }
 
     impl TestManipulate {
-        const fn new() -> Self {
+        const fn new(logs: &'static [&'static str]) -> Self {
             Self {
                 state: [
                     TestKeyState::new(),
@@ -484,6 +504,7 @@ mod tests {
                     TestKeyState::new(),
                 ],
                 index: AtomicUsize::new(0),
+                logs,
             }
         }
 
@@ -516,7 +537,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(500));
 
                 t.static_state.assert_input_sent(&expected);
-                guard.expect_logs(&[]);
+                guard.expect_logs(self.logs);
                 t.static_state.assert_no_calls_remaining();
             });
         }
@@ -582,7 +603,8 @@ mod tests {
 
     #[test]
     fn observes_non_atomic_add_one_from_empty() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set.", "API key detected at path: test.key"];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(FILE_TEST_KEY, None, &|rt| {
             rt.non_atomic_write_key("test.key", b"0123456789abcdef");
         });
@@ -590,7 +612,12 @@ mod tests {
 
     #[test]
     fn observes_non_atomic_add_one_from_non_empty() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "API key detected at path: test.key",
+            "API key detected at path: other.key",
+        ];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_TEST_KEY | FILE_OTHER_KEY,
             Some(&|rt| {
@@ -604,7 +631,12 @@ mod tests {
 
     #[test]
     fn observes_non_atomic_add_two_from_non_empty() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "API key detected at path: test.key",
+            "API key detected at path: other.key",
+        ];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(FILE_TEST_KEY | FILE_OTHER_KEY, None, &|rt| {
             rt.non_atomic_write_key("test.key", b"0123456789abcdef");
             rt.non_atomic_write_key("other.key", b"fedcba9876543210");
@@ -613,7 +645,8 @@ mod tests {
 
     #[test]
     fn observes_non_atomic_update_without_other_files() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set.", "API key detected at path: test.key"];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_TEST_KEY_2,
             Some(&|rt| {
@@ -627,7 +660,12 @@ mod tests {
 
     #[test]
     fn observes_non_atomic_update_with_other_files() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "API key detected at path: test.key",
+            "API key detected at path: other.key",
+        ];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_TEST_KEY_2 | FILE_OTHER_KEY,
             Some(&|rt| {
@@ -642,7 +680,8 @@ mod tests {
 
     #[test]
     fn observes_atomic_add_one_from_empty() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set.", "API key detected at path: test.key"];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(FILE_TEST_KEY, None, &|rt| {
             rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
         });
@@ -650,7 +689,12 @@ mod tests {
 
     #[test]
     fn observes_atomic_add_one_from_non_empty() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "API key detected at path: test.key",
+            "API key detected at path: other.key",
+        ];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_TEST_KEY | FILE_OTHER_KEY,
             Some(&|rt| {
@@ -664,7 +708,12 @@ mod tests {
 
     #[test]
     fn observes_atomic_add_two_from_non_empty() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "API key detected at path: test.key",
+            "API key detected at path: other.key",
+        ];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(FILE_TEST_KEY | FILE_OTHER_KEY, None, &|rt| {
             rt.atomic_persist("test.key", atomic_prepare(b"0123456789abcdef"));
             rt.atomic_persist("other.key", atomic_prepare(b"fedcba9876543210"));
@@ -673,7 +722,8 @@ mod tests {
 
     #[test]
     fn observes_atomic_update_without_other_files() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set.", "API key detected at path: test.key"];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_TEST_KEY_2,
             Some(&|rt| {
@@ -687,7 +737,12 @@ mod tests {
 
     #[test]
     fn observes_atomic_update_with_other_files() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "API key detected at path: test.key",
+            "API key detected at path: other.key",
+        ];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_TEST_KEY_2 | FILE_OTHER_KEY,
             Some(&|rt| {
@@ -702,7 +757,8 @@ mod tests {
 
     #[test]
     fn observes_remove_one_with_no_remaining_file() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set."];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             NO_FILES,
             Some(&|rt| {
@@ -716,7 +772,8 @@ mod tests {
 
     #[test]
     fn observes_remove_one_with_remaining_file() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set.", "API key detected at path: other.key"];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             FILE_OTHER_KEY,
             Some(&|rt| {
@@ -731,7 +788,8 @@ mod tests {
 
     #[test]
     fn observes_remove_two_with_no_remaining_files() {
-        static T: TestManipulate = TestManipulate::new();
+        static LOGS: &[&str] = &["Retrieving key set."];
+        static T: TestManipulate = TestManipulate::new(LOGS);
         T.run(
             NO_FILES,
             Some(&|rt| {
@@ -747,213 +805,218 @@ mod tests {
 
     #[test]
     fn allows_mode_700() {
-        static T: TestMode = TestMode::new("test.key", 0o700, &[]);
+        static LOGS: &[&str] = &["Retrieving key set.", "API key detected at path: test.key"];
+        static T: TestMode = TestMode::new("test.key", 0o700, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_670() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o670,
-            &["Key watcher error: test.key has insecure permissions: readable, writable, and executable by everyone in owning group"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable, writable, and executable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o670, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_660() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o660,
-            &["Key watcher error: test.key has insecure permissions: readable and writable by everyone in owning group"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable and writable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o660, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_650() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o650,
-            &["Key watcher error: test.key has insecure permissions: readable and executable by everyone in owning group"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable and executable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o650, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_640() {
-        static T: TestMode = TestMode::new("test.key", 0o640, &["Key watcher error: test.key has insecure permissions: readable by everyone in owning group"]);
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o640, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_630() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o630,
-            &["Key watcher error: test.key has insecure permissions: writable and executable by everyone in owning group"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: writable and executable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o630, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_620() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o620,
-            &["Key watcher error: test.key has insecure permissions: writable by everyone in owning group"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: writable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o620, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_610() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o610,
-            &["Key watcher error: test.key has insecure permissions: executable by everyone in owning group"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: executable by everyone in owning group, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o610, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_607() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o607,
-            &["Key watcher error: test.key has insecure permissions: readable, writable, and executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable, writable, and executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o607, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_606() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o606,
-            &["Key watcher error: test.key has insecure permissions: readable and writable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable and writable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o606, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_605() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o605,
-            &["Key watcher error: test.key has insecure permissions: readable and executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable and executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o605, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_604() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o604,
-            &["Key watcher error: test.key has insecure permissions: readable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o604, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_603() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o603,
-            &["Key watcher error: test.key has insecure permissions: writable and executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: writable and executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o603, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_602() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o602,
-            &["Key watcher error: test.key has insecure permissions: writable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: writable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o602, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_601() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o601,
-            &["Key watcher error: test.key has insecure permissions: executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o601, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_677() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o677,
-            &["Key watcher error: test.key has insecure permissions: readable, writable, and executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable, writable, and executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o677, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_676() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o676,
-            &["Key watcher error: test.key has insecure permissions: readable and writable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable and writable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o676, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_675() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o675,
-            &["Key watcher error: test.key has insecure permissions: readable and executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable and executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o675, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_674() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o674,
-            &["Key watcher error: test.key has insecure permissions: readable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: readable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o674, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_673() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o673,
-            &["Key watcher error: test.key has insecure permissions: writable and executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: writable and executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o673, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_672() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o672,
-            &["Key watcher error: test.key has insecure permissions: writable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: writable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o672, LOGS);
         T.run();
     }
 
     #[test]
     fn rejects_mode_671() {
-        static T: TestMode = TestMode::new(
-            "test.key",
-            0o671,
-            &["Key watcher error: test.key has insecure permissions: executable by everyone"],
-        );
+        static LOGS: &[&str] = &[
+            "Retrieving key set.",
+            "Key watcher error: Insecure permissions detected: executable by everyone, path: test.key",
+        ];
+        static T: TestMode = TestMode::new("test.key", 0o671, LOGS);
         T.run();
     }
 }

@@ -114,10 +114,10 @@ impl LoggerGuard {
 
     pub fn spawn(&self, task: impl FnOnce() -> io::Result<()> + Send + 'static) -> ThreadHandle {
         let proxy = self.proxy();
-        ThreadHandle::spawn(Box::new(move || {
+        ThreadHandle::spawn(move || {
             let _guard = proxy.install();
             task()
-        }))
+        })
     }
 }
 

@@ -6,6 +6,12 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq)]
+pub struct TLSOptions {
+    pub certificate: PathBuf,
+    pub private_key: PathBuf,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct ChildArgs {
     pub port: NonZeroU16,
 }
@@ -14,6 +20,7 @@ pub struct ChildArgs {
 pub struct ParentArgs {
     pub port: NonZeroU16,
     pub key_dir: PathBuf,
+    pub tls: Option<TLSOptions>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -30,6 +37,10 @@ pub enum ArgsError {
     InvalidPort,
     MissingKeyDir,
     EmptyKeyDir,
+    MissingCertificate,
+    EmptyCertificate,
+    MissingPrivateKey,
+    EmptyPrivateKey,
     UnknownFlag(OsString),
 }
 
@@ -42,6 +53,10 @@ impl ArgsError {
             ArgsError::InvalidPort => Cow::Borrowed("Port is invalid."),
             ArgsError::MissingKeyDir => Cow::Borrowed("Key directory missing."),
             ArgsError::EmptyKeyDir => Cow::Borrowed("Key directory cannot be empty."),
+            ArgsError::MissingCertificate => Cow::Borrowed("Certificate file missing."),
+            ArgsError::EmptyCertificate => Cow::Borrowed("Certificate file cannot be empty."),
+            ArgsError::MissingPrivateKey => Cow::Borrowed("Private key file missing."),
+            ArgsError::EmptyPrivateKey => Cow::Borrowed("Private key file cannot be empty."),
             ArgsError::UnknownFlag(option) => {
                 let mut result = String::new();
                 result.push_str("Unknown flag or option: '");
@@ -59,6 +74,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
         ExpectParentPort,
         ExpectKeyDir,
         ExpectChildPort,
+        ExpectCertificate,
+        ExpectPrivateKey,
     }
 
     let mut state = ArgState::Initial;
@@ -66,6 +83,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
     let mut child_port = None::<NonZeroU16>;
     let mut parent_port = None::<NonZeroU16>;
     let mut key_dir = None::<PathBuf>;
+    let mut certificate = None::<PathBuf>;
+    let mut private_key = None::<PathBuf>;
 
     // Skip the first argument - it's the executable.
     for arg in args.into_iter().skip(1) {
@@ -75,6 +94,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 Some("-version" | "--version" | "-v" | "-V") => return Err(ArgsError::ShowVersion),
                 Some("-p" | "--port") => state = ArgState::ExpectParentPort,
                 Some("-k" | "--key-dir") => state = ArgState::ExpectKeyDir,
+                Some("-c" | "--certificate") => state = ArgState::ExpectCertificate,
+                Some("-P" | "--private-key") => state = ArgState::ExpectPrivateKey,
                 Some("--child-process") => state = ArgState::ExpectChildPort,
                 _ => return Err(ArgsError::UnknownFlag(arg)),
             },
@@ -108,22 +129,54 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                     }
                 },
             },
+            ArgState::ExpectCertificate => {
+                if arg.is_empty() {
+                    return Err(ArgsError::EmptyCertificate);
+                }
+
+                certificate = Some(PathBuf::from(arg));
+                state = ArgState::Initial;
+            }
+            ArgState::ExpectPrivateKey => {
+                if arg.is_empty() {
+                    return Err(ArgsError::EmptyPrivateKey);
+                }
+
+                private_key = Some(PathBuf::from(arg));
+                state = ArgState::Initial;
+            }
         }
     }
 
     match state {
-        ArgState::Initial => match child_port {
-            Some(port) => Ok(Args::Child(ChildArgs { port })),
-            None => match (parent_port, key_dir) {
-                // Show help if no arguments are given.
-                (None, None) => Err(ArgsError::ShowHelp),
-                (None, Some(_)) => Err(ArgsError::MissingPort),
-                (Some(_), None) => Err(ArgsError::MissingKeyDir),
-                (Some(port), Some(key_dir)) => Ok(Args::Parent(ParentArgs { port, key_dir })),
-            },
-        },
+        ArgState::Initial => {
+            let tls = match (certificate, private_key) {
+                (None, None) => None,
+                (None, Some(_)) => return Err(ArgsError::MissingCertificate),
+                (Some(_), None) => return Err(ArgsError::MissingPrivateKey),
+                (Some(certificate), Some(private_key)) => Some(TLSOptions {
+                    certificate,
+                    private_key,
+                }),
+            };
+
+            match child_port {
+                Some(port) => Ok(Args::Child(ChildArgs { port })),
+                None => match (parent_port, key_dir) {
+                    // Show help if no arguments are given.
+                    (None, None) => Err(ArgsError::ShowHelp),
+                    (None, Some(_)) => Err(ArgsError::MissingPort),
+                    (Some(_), None) => Err(ArgsError::MissingKeyDir),
+                    (Some(port), Some(key_dir)) => {
+                        Ok(Args::Parent(ParentArgs { port, key_dir, tls }))
+                    }
+                },
+            }
+        }
         ArgState::ExpectParentPort => Err(ArgsError::MissingPort),
         ArgState::ExpectKeyDir => Err(ArgsError::MissingKeyDir),
         ArgState::ExpectChildPort => Err(ArgsError::MissingPort),
+        ArgState::ExpectCertificate => Err(ArgsError::EmptyCertificate),
+        ArgState::ExpectPrivateKey => Err(ArgsError::EmptyPrivateKey),
     }
 }

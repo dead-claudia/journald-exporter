@@ -3,6 +3,7 @@ use crate::prelude::*;
 use super::mocks::*;
 use super::*;
 use crate::ffi::*;
+use crate::parent::key_watcher::KeyWatcherTarget;
 
 pub enum ExpectedSpawnResult {
     #[allow(dead_code)]
@@ -59,7 +60,7 @@ pub struct StaticState {
 impl StaticState {
     pub const fn new() -> StaticState {
         StaticState {
-            state: ParentIpcState::new("/bin/cat", FakeIpcChildHandle::new()),
+            state: ParentIpcState::new(FakeIpcChildHandle::new()),
         }
     }
 
@@ -73,15 +74,16 @@ impl StaticState {
     }
 
     pub fn init_test_state_with_key_dir(&'static self, key_dir: std::path::PathBuf) {
-        self.state.init_dynamic(
-            UserGroup {
+        self.state.init_dynamic(ParentIpcDynamic {
+            port: std::num::NonZeroU16::new(1).unwrap(),
+            child_user_group: UserGroup {
                 uid: current_uid(),
                 gid: current_gid(),
             },
-            Box::new([]),
-            PromEnvironment::new(mock_system_time(123, 456)),
-            key_dir,
-        );
+            prom_environment: PromEnvironment::new(mock_system_time(123, 456)),
+            key_target: KeyWatcherTarget::new(key_dir),
+            tls_config: None,
+        });
     }
 
     pub fn run_ipc_spawn(

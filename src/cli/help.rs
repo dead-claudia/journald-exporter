@@ -25,6 +25,14 @@ Arguments:
 -k KEY_DIRECTORY, --key-dir KEY_DIRECTORY
     The directory with accepted API keys.
 
+-c CERTIFICATE_FILE, --certificate CERTIFICATE_FILE
+    The PEM-encoded file with the list of public certificates to use for
+    HTTPS. Must be used in conjunction with `-P`/`--private-key`.
+
+-P PRIVATE_KEY_FILE, --private-key PRIVATE_KEY_FILE
+    The PEM-encoded file with the private key to use for HTTPS. Must be used
+    in conjunction with `-c`/`--certificate`.
+
 Notes:
 
   - When run as root, a `journald-exporter` user is expected to exist, and the
@@ -41,7 +49,8 @@ Notes:
   - The key directory is watched, so new API keys can be added and removed
     without having to restart the server. It can also have multiple key files,
     in which all keys in them are accepted, allowing for zero downtime key
-    updates.
+    updates. This is only for the key directory - the HTTPS certificate and
+    private key files cannot be updated this way.
 
   - API keys are specified in hex, both within the key files and as the
     "password" for authorization.

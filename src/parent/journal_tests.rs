@@ -24,7 +24,7 @@ struct Entry {
 impl TestState {
     const fn init() -> Self {
         Self {
-            state: ParentIpcState::new("/bin/cat", FakeIpcChildHandle::new()),
+            state: ParentIpcState::new(FakeIpcChildHandle::new()),
             provider: FakeSystemdProvider::new(Id128(123)),
         }
     }
