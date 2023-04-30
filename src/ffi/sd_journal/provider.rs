@@ -12,12 +12,13 @@ use std::ffi::CStr;
 static WATCHDOG_MSG: &CStr = cstr!("WATCHDOG=1");
 
 pub struct NativeSystemdProvider {
-    watchdog_enabled: bool,
+    watchdog_usec: SystemdMonotonicUsec,
+    last_watchdog: Mutex<SystemdMonotonicUsec>,
     boot_id: Id128,
 }
 
 impl SystemdProvider for NativeSystemdProvider {
-    fn watchdog_notify(&self) -> io::Result<()> {
+    fn watchdog_notify(&'static self) -> io::Result<()> {
         self.sd_notify(WATCHDOG_MSG)
     }
 
@@ -48,9 +49,11 @@ impl SystemdProvider for NativeSystemdProvider {
 }
 
 impl NativeSystemdProvider {
-    pub const fn new(watchdog_enabled: bool, boot_id: Id128) -> NativeSystemdProvider {
+    pub const fn new(watchdog_usec: u64, boot_id: Id128) -> NativeSystemdProvider {
         NativeSystemdProvider {
-            watchdog_enabled,
+            // Give some cushion for missed watchdogs.
+            watchdog_usec: SystemdMonotonicUsec(watchdog_usec / 3),
+            last_watchdog: Mutex::new(SystemdMonotonicUsec(0)),
             boot_id,
         }
     }
@@ -58,26 +61,41 @@ impl NativeSystemdProvider {
     pub fn open_provider() -> io::Result<NativeSystemdProvider> {
         let boot_id = Id128::get_from_boot()?;
 
-        let watchdog_enabled = !cfg!(miri) && {
+        let mut watchdog_usec = 0;
+
+        if !cfg!(miri) {
             // SAFETY: It's just invoking the native systemd function, and nothing here accesses
             // any Rust-visible memory.
             match sd_check("sd_watchdog_enabled", unsafe {
-                daemon::sd_watchdog_enabled(0, std::ptr::null_mut())
+                daemon::sd_watchdog_enabled(0, &mut watchdog_usec)
             }) {
-                Ok(result) => result != 0,
+                Ok(0) => watchdog_usec = 0,
+                Ok(_) => {}
                 Err(_) => {
                     std::panic::panic_any("`WATCHDOG_USEC` and/or `WATCHDOG_PID` are invalid")
                 }
             }
-        };
+        }
 
-        Ok(NativeSystemdProvider::new(watchdog_enabled, boot_id))
+        Ok(NativeSystemdProvider::new(watchdog_usec, boot_id))
     }
 
-    pub fn sd_notify(&self, msg: &CStr) -> io::Result<()> {
-        if self.watchdog_enabled {
+    pub fn sd_notify(&'static self, msg: &CStr) -> io::Result<()> {
+        if self.watchdog_usec != SystemdMonotonicUsec(0) {
             if cfg!(miri) {
                 return Err(Error::from_raw_os_error(libc::ENOTCONN));
+            }
+
+            let next: SystemdMonotonicUsec = self.get_monotonic_time_usec();
+
+            // Easier to use a mutex. It's almost never contended, so shouldn't be an issue in
+            // practice.
+            {
+                let mut prev = self.last_watchdog.lock().unwrap_or_else(|e| e.into_inner());
+                if prev.0 >= next.0 {
+                    return Ok(());
+                }
+                prev.0 = next.0.wrapping_add(self.watchdog_usec.0);
             }
 
             // SAFETY: It's just invoking the native systemd function, and invariants are upheld via the
@@ -100,29 +118,26 @@ mod tests {
 
     #[test]
     fn native_systemd_provider_mirrors_boot_id() {
-        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(true, Id128(123));
+        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(111, Id128(123));
         assert_eq!(PROVIDER.boot_id(), &Id128(123));
     }
 
     #[test]
     fn native_systemd_provider_get_monotonic_usec_works() {
-        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(true, Id128(123));
-        // Assert the unit tests are running outside a service.
-        assert_result_eq(
-            PROVIDER.watchdog_notify(),
-            Err(Error::from_raw_os_error(libc::ENOTCONN)),
-        );
+        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(111, Id128(123));
+        // Just needs to run.
+        let _time = PROVIDER.get_monotonic_time_usec();
     }
 
     #[test]
     fn native_systemd_provider_notify_works_with_watchdog_disabled() {
-        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(false, Id128(123));
+        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(0, Id128(123));
         assert_result_eq(PROVIDER.watchdog_notify(), Ok(()));
     }
 
     #[test]
     fn native_systemd_provider_notify_works_with_watchdog_enabled() {
-        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(true, Id128(123));
+        static PROVIDER: NativeSystemdProvider = NativeSystemdProvider::new(111, Id128(123));
         // Assert the unit tests are running outside a service.
         assert_result_eq(
             PROVIDER.watchdog_notify(),
