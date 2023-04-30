@@ -22,7 +22,7 @@ impl IdName {
     #[cfg(test)]
     pub fn new(name_data: &[u8]) -> Self {
         let mut data = [0_u8; MAX_NAME_LEN];
-        copy_to_start(&mut data, name_data);
+        data[..name_data.len()].copy_from_slice(name_data);
         Self {
             len: truncate_usize_u8(name_data.len()),
             data,

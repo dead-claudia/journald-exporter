@@ -61,9 +61,8 @@ impl Key {
     pub fn from_hex(hex: &[u8]) -> Option<Key> {
         if is_valid_hex_string(hex) {
             let mut raw = [0_u8; MAX_KEY_LEN];
-            copy_to_start(&mut raw, hex);
-            for r in raw[..hex.len()].iter_mut() {
-                *r = normalize_hex(*r);
+            for (target, source) in raw.iter_mut().zip(hex) {
+                *target = normalize_hex(*source);
             }
             Some(Key { raw })
         } else {

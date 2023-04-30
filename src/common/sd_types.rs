@@ -231,7 +231,7 @@ impl ServiceRepr {
     pub fn set_service(&mut self, service: Service) {
         let bytes = service.as_bytes();
         self.service_len = truncate_usize_u16(bytes.len());
-        copy_to_start(&mut self.service_bytes, bytes);
+        self.service_bytes[..bytes.len()].copy_from_slice(bytes);
     }
 }
 

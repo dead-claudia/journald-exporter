@@ -54,7 +54,7 @@ impl Read for &ReadSpy {
             }
             let data = result?;
             let len = buf.len().min(data.len());
-            copy_to_start(buf, &data[..len]);
+            buf[..len].copy_from_slice(&data[..len]);
             return Ok(len);
         }
 
