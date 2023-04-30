@@ -26,9 +26,7 @@ pub fn set_euid(id: u32) -> io::Result<()> {
     assert_not_miri();
 
     // SAFETY: Result is checked, and it doesn't touch Rust-accessible memory
-    unsafe {
-        syscall_check_int("seteuid", libc::seteuid(id))?;
-    }
+    syscall_check_int("seteuid", unsafe { libc::seteuid(id) })?;
 
     Ok(())
 }
@@ -37,9 +35,7 @@ pub fn set_egid(id: u32) -> io::Result<()> {
     assert_not_miri();
 
     // SAFETY: Result is checked, and it doesn't touch Rust-accessible memory
-    unsafe {
-        syscall_check_int("setegid", libc::setegid(id))?;
-    }
+    syscall_check_int("setegid", unsafe { libc::setegid(id) })?;
 
     Ok(())
 }

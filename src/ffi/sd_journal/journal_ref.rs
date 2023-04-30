@@ -19,12 +19,9 @@ impl JournalRef for NativeJournalRef {
 
     fn open(_: &'static Self::Provider) -> io::Result<Self> {
         let mut raw = std::ptr::null_mut();
-        sd_check(
-            "sd_journal_open",
-            // SAFETY: It's just invoking the native systemd function, and invariants are upheld via
-            // the function's type.
-            unsafe { sd_journal_open(&mut raw, 0) },
-        )?;
+        // SAFETY: It's just invoking the native systemd function, and invariants are upheld via
+        // the function's type.
+        sd_check("sd_journal_open", unsafe { sd_journal_open(&mut raw, 0) })?;
         Ok(NativeJournalRef {
             raw: NonNull::new(raw).expect("`sd_journal_open` returned null pointer for journal"),
         })
@@ -134,13 +131,11 @@ impl JournalRef for NativeJournalRef {
 impl NativeJournalRef {
     pub fn get_data_threshold(&mut self) -> io::Result<usize> {
         let mut threshold = 0;
-        // SAFETY: FFI call doesn't modify anything directly observable by safe Rust code.
-        sd_check(
-            "sd_journal_get_data_threshold",
-            // SAFETY: It's just invoking the native systemd function, and invariants are upheld via
-            // the function's type.
-            unsafe { sd_journal_get_data_threshold(self.raw.as_ptr(), &mut threshold) },
-        )?;
+        // SAFETY: It's just invoking the native systemd function, and invariants are upheld via
+        // the function's type.
+        sd_check("sd_journal_get_data_threshold", unsafe {
+            sd_journal_get_data_threshold(self.raw.as_ptr(), &mut threshold)
+        })?;
 
         Ok(threshold)
     }
@@ -199,13 +194,10 @@ mod tests {
         }
 
         // SAFETY: FFI call initialized with all pointers correct.
-        unsafe {
-            sd_check(
-                "`sd_journal_sendv` invoked with invalid parameters",
-                sd_journal_sendv(iovecs.as_ptr(), truncate_usize_c_int(iovecs.len())),
-            )
-            .unwrap();
-        }
+        sd_check("sd_journal_sendv", unsafe {
+            sd_journal_sendv(iovecs.as_ptr(), truncate_usize_c_int(iovecs.len()))
+        })
+        .unwrap();
     }
 
     #[test]
