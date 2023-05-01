@@ -23,8 +23,6 @@ pub fn main() {
     // parent dies, for the E2E tests (and in general when run via `systemd-run`).
     request_signal_when_parent_terminates(Signal::SIGTERM);
 
-    human_panic::setup_panic!();
-
     // Wire up the logger that's used everywhere to just print everything to stdout/stderr.
     log::set_max_level(log::LevelFilter::Trace);
     // SAFETY: Obviously no threads have been spawned yet, so it's fine to not go through all the
