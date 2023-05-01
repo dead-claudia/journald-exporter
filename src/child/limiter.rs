@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::net::Ipv6Addr;
 
 // A simple once-per-second IP rate limiter. Concurrency is controlled externally.
@@ -26,7 +25,7 @@ impl Limiter {
         }
     }
 
-    pub fn check_throttled(&mut self, second: u64, key: IpAddr) -> bool {
+    pub fn check_throttled(&mut self, second: u64, key: Ipv6Addr) -> bool {
         self.reap(second);
 
         // Start from the end, as more recent entries are the most likely to repeat. Also will help
@@ -34,10 +33,7 @@ impl Limiter {
         if self.throttle_set.iter().rev().any(|k| *k == key) {
             true
         } else {
-            self.throttle_set.push(match key {
-                IpAddr::V4(v4) => v4.to_ipv6_mapped(),
-                IpAddr::V6(v6) => v6,
-            });
+            self.throttle_set.push(key);
             false
         }
     }
@@ -49,60 +45,63 @@ mod tests {
     #![allow(clippy::bool_assert_comparison)]
 
     use super::*;
-    use const_str::ip_addr;
+
+    fn ip_addr(s: &str) -> Ipv6Addr {
+        s.parse().unwrap()
+    }
 
     #[test]
     fn fails_to_throttle_on_one_call_per_second_with_one_key() {
         let mut limiter = Limiter::new();
 
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), false,);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), false,);
     }
 
     #[test]
     fn throttles_on_two_calls_per_second_with_one_key() {
         let mut limiter = Limiter::new();
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
     }
 
     #[test]
     fn throttles_on_three_calls_per_second_with_one_key() {
         let mut limiter = Limiter::new();
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
     }
 
     #[test]
     fn fails_to_throttle_on_one_call_per_second_with_two_keys() {
         let mut limiter = Limiter::new();
 
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), false,);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::2222")), false,);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), false,);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::2222")), false,);
     }
 
     #[test]
     fn throttles_on_two_calls_per_second_with_two_keys() {
         let mut limiter = Limiter::new();
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::2222"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::2222")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::2222"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::2222")), true);
     }
 
     #[test]
     fn throttles_on_three_calls_per_second_with_two_keys() {
         let mut limiter = Limiter::new();
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::2222"));
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::2222"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::2222")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::2222"));
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::2222"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::2222")), true);
     }
 
     #[test]
@@ -110,7 +109,7 @@ mod tests {
         let mut limiter = Limiter::new();
 
         limiter.reap(1);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), false,);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), false,);
     }
 
     #[test]
@@ -118,8 +117,8 @@ mod tests {
         let mut limiter = Limiter::new();
         limiter.reap(1);
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
     }
 
     #[test]
@@ -127,9 +126,9 @@ mod tests {
         let mut limiter = Limiter::new();
         limiter.reap(1);
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
     }
 
     #[test]
@@ -137,8 +136,8 @@ mod tests {
         let mut limiter = Limiter::new();
         limiter.reap(1);
 
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), false,);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::2222")), false,);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), false,);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::2222")), false,);
     }
 
     #[test]
@@ -146,10 +145,10 @@ mod tests {
         let mut limiter = Limiter::new();
         limiter.reap(1);
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::2222"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::2222")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::2222"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::2222")), true);
     }
 
     #[test]
@@ -157,11 +156,11 @@ mod tests {
         let mut limiter = Limiter::new();
         limiter.reap(1);
 
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::2222"));
-        limiter.check_throttled(1, ip_addr!("2001::1111"));
-        limiter.check_throttled(1, ip_addr!("2001::2222"));
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::1111")), true);
-        assert_eq!(limiter.check_throttled(1, ip_addr!("2001::2222")), true);
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::2222"));
+        limiter.check_throttled(1, ip_addr("2001::1111"));
+        limiter.check_throttled(1, ip_addr("2001::2222"));
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::1111")), true);
+        assert_eq!(limiter.check_throttled(1, ip_addr("2001::2222")), true);
     }
 }
