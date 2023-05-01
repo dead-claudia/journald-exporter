@@ -43,7 +43,7 @@ pub fn main() {
     };
 
     let result = match args {
-        Args::Child(args) => start_child(args),
+        Args::Child => start_child(),
         Args::Parent(args) => start_parent(args),
     };
 

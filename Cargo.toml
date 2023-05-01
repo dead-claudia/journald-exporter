@@ -4,6 +4,7 @@ version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Claudia Meadows (@dead-claudia)"]
+homepage = "https://github.com/dead-claudia/journald-exporter"
 
 [dependencies]
 libc = "0.2.137"

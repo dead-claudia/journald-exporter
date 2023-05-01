@@ -105,7 +105,7 @@ fn double_hyphen_returns_unknown_flag() {
 
 #[test]
 fn port_start_returns_missing_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p]),
             Err(ArgsError::MissingPort),
@@ -127,7 +127,7 @@ fn key_dir_start_returns_missing_key_dir() {
 
 #[test]
 fn non_numeric_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "abc"]),
             Err(ArgsError::InvalidPort),
@@ -138,7 +138,7 @@ fn non_numeric_port_number_returns_invalid_port() {
 
 #[test]
 fn partially_numeric_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "abc123"]),
             Err(ArgsError::InvalidPort),
@@ -149,7 +149,7 @@ fn partially_numeric_port_number_returns_invalid_port() {
 
 #[test]
 fn hex_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "0x123"]),
             Err(ArgsError::InvalidPort),
@@ -160,7 +160,7 @@ fn hex_port_number_returns_invalid_port() {
 
 #[test]
 fn negative_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "-123"]),
             Err(ArgsError::InvalidPort),
@@ -171,7 +171,7 @@ fn negative_port_number_returns_invalid_port() {
 
 #[test]
 fn negative_zero_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "-0"]),
             Err(ArgsError::InvalidPort),
@@ -203,22 +203,10 @@ fn unsigned_port_number_for_parent_returns_missing_key_dir() {
 }
 
 #[test]
-fn plus_port_number_for_child_returns_success() {
+fn contains_child_process_returns_child() {
     assert_eq!(
-        parse_args(&["journald-exporter", "--child-process", "+123"]),
-        Ok(Args::Child(ChildArgs {
-            port: NonZeroU16::new(123).unwrap(),
-        }))
-    );
-}
-
-#[test]
-fn unsigned_port_number_for_child_returns_success() {
-    assert_eq!(
-        parse_args(&["journald-exporter", "--child-process", "123"]),
-        Ok(Args::Child(ChildArgs {
-            port: NonZeroU16::new(123).unwrap(),
-        }))
+        parse_args(&["journald-exporter", "--child-process"]),
+        Ok(Args::Child)
     );
 }
 
