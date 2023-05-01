@@ -63,6 +63,10 @@ impl FixedCString {
         unsafe {
             let mut p = self.as_ptr();
 
+            if !cfg!(miri) {
+                return libc::strlen(p);
+            }
+
             while p.read() != 0 {
                 p = p.add(1);
             }
@@ -83,6 +87,10 @@ impl PartialEq for FixedCString {
         unsafe {
             let mut a = self.0.as_ptr();
             let mut b = other.0.as_ptr();
+
+            if !cfg!(miri) {
+                return libc::strcmp(a, b) == 0;
+            }
 
             loop {
                 let ac = a.read();
