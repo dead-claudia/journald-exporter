@@ -2,8 +2,10 @@ use crate::prelude::*;
 
 use super::ipc::*;
 use super::request::*;
-use super::server::TinyHttpRequestContext;
+use super::server::TinyHttpResponseContext;
 use super::PENDING_REQUEST_CAPACITY;
+use crate::child::server::build_request_context;
+use crate::child::server::respond;
 use crate::ffi::set_non_blocking;
 use crate::ffi::ExitCode;
 use crate::ffi::ExitResult;
@@ -13,8 +15,9 @@ use std::num::NonZeroU16;
 use std::os::unix::prelude::OsStrExt;
 use std::os::unix::prelude::OsStringExt;
 
-static SERVER_STATE: ServerState<TinyHttpRequestContext> = ServerState::new();
-static REQUEST_CHANNEL: Channel<TinyHttpRequestContext, PENDING_REQUEST_CAPACITY> = Channel::new();
+static SERVER_STATE: ServerState<TinyHttpResponseContext> = ServerState::new();
+static REQUEST_CHANNEL: Channel<(Instant, tiny_http::Request), PENDING_REQUEST_CAPACITY> =
+    Channel::new();
 
 fn get_port() -> Option<NonZeroU16> {
     let result = std::env::var_os("PORT")?;
@@ -118,8 +121,8 @@ fn server_recv_task(server: tiny_http::Server) -> impl FnOnce() -> io::Result<()
 
         while !REQUEST_CHANNEL.has_closed() {
             if let Some(request) = server.recv_timeout(Duration::from_secs(1))? {
-                if let Err(ctx) = REQUEST_CHANNEL.send(TinyHttpRequestContext::new(request)) {
-                    ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
+                if let Err((_, request)) = REQUEST_CHANNEL.send((Instant::now(), request)) {
+                    respond(request, &RESPONSE_UNAVAILABLE, &[]);
                 }
             }
         }
@@ -129,7 +132,7 @@ fn server_recv_task(server: tiny_http::Server) -> impl FnOnce() -> io::Result<()
 }
 
 fn handle_request_task(
-    shared: RequestShared<TinyHttpRequestContext, std::io::Stdout>,
+    shared: RequestShared<TinyHttpResponseContext, std::io::Stdout>,
 ) -> impl FnOnce() -> io::Result<()> + Send {
     move || {
         let _guard = REQUEST_CHANNEL.close_guard();
@@ -146,8 +149,10 @@ fn handle_request_task(
             }
 
             if let Some(requests) = REQUEST_CHANNEL.read_timeout(duration) {
-                for ctx in requests.into_iter() {
-                    handle_request(ctx, &shared);
+                for (received, request) in requests.into_iter() {
+                    let response = TinyHttpResponseContext::new(request);
+                    let request = build_request_context(received, response.inner());
+                    handle_request(request, response, &shared);
                 }
             }
         }

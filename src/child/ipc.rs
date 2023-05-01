@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
-use super::request::RequestContext;
 use super::request::RequestShared;
+use super::request::ResponseContext;
 use super::request::ResponseHead;
 use super::request::ServerState;
 use super::request::RESPONSE_OK_METRICS;
@@ -13,7 +13,7 @@ use crate::ffi::Pollable;
 use crate::state::ipc::parent::ResponseItem;
 
 fn read_request(
-    state: &ServerState<impl RequestContext>,
+    state: &ServerState<impl ResponseContext>,
     buf: &[u8],
 ) -> ipc::parent::DecoderResponse {
     let mut decoder = state.decoder.lock();
@@ -22,7 +22,7 @@ fn read_request(
 }
 
 fn resume_queued_requests(
-    state: &ServerState<impl RequestContext>,
+    state: &ServerState<impl ResponseContext>,
     head: &'static ResponseHead,
     body: &[u8],
 ) {
@@ -37,13 +37,13 @@ fn resume_queued_requests(
         take(&mut *guard)
     };
 
-    for ctx in pending {
-        ctx.respond(head, body);
+    for res in pending {
+        res.respond(head, body);
     }
 }
 
 fn handle_key_set_response(
-    state: &ServerState<impl RequestContext>,
+    state: &ServerState<impl ResponseContext>,
     response: ResponseItem<KeySet>,
 ) {
     match response {
@@ -58,7 +58,7 @@ fn handle_key_set_response(
 }
 
 fn handle_metrics_response(
-    state: &ServerState<impl RequestContext>,
+    state: &ServerState<impl ResponseContext>,
     response: ResponseItem<Box<[u8]>>,
 ) {
     match response {
@@ -74,7 +74,7 @@ fn handle_metrics_response(
 }
 
 pub fn child_ipc(
-    state: &ServerState<impl RequestContext>,
+    state: &ServerState<impl ResponseContext>,
     mut input: impl Read + Pollable,
     terminate_notify: &Notify,
 ) -> io::Result<()> {
@@ -96,7 +96,7 @@ pub struct IPCRequester<C> {
     pending_requests: Mutex<heapless::Vec<C, PENDING_REQUEST_CAPACITY>>,
 }
 
-impl<C: RequestContext> IPCRequester<C> {
+impl<C: ResponseContext> IPCRequester<C> {
     pub const fn new() -> Self {
         Self {
             pending_requests: Mutex::new(heapless::Vec::new()),
@@ -114,21 +114,21 @@ impl<C: RequestContext> IPCRequester<C> {
 }
 
 // Returns `true` if successfully sent.
-pub fn send_msg<C: RequestContext + 'static>(
+pub fn send_msg<C: ResponseContext + 'static>(
     shared: &RequestShared<C, impl ImmutableWrite>,
     buf: &[u8],
 ) -> bool {
     try_send_msg(&shared.state.terminate_notify, shared.output.inner(), buf)
 }
 
-pub fn request_metrics<C: RequestContext + 'static>(
-    ctx: C,
+pub fn request_metrics<C: ResponseContext + 'static>(
+    res: C,
     shared: &RequestShared<C, impl ImmutableWrite>,
 ) {
     let pending_requests = &shared.state.ipc_requester.pending_requests;
     let mut guard = pending_requests.lock().unwrap_or_else(|e| e.into_inner());
     let is_first = guard.is_empty();
-    let result = guard.push(ctx);
+    let result = guard.push(res);
 
     // Don't retain the lock longer than necessary.
     drop(guard);
@@ -139,8 +139,8 @@ pub fn request_metrics<C: RequestContext + 'static>(
                 resume_queued_requests(shared.state, &RESPONSE_UNAVAILABLE, &[]);
             }
         }
-        Err(ctx) => {
-            ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
+        Err(res) => {
+            res.respond(&RESPONSE_UNAVAILABLE, &[]);
         }
     }
 }

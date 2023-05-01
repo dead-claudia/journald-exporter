@@ -2,6 +2,7 @@ use crate::prelude::*;
 
 use super::request::RequestContext;
 use super::request::RequestShared;
+use super::request::ResponseContext;
 use crate::child::ipc::child_ipc;
 use crate::child::request::handle_request;
 use crate::child::request::ResponseHead;
@@ -10,7 +11,6 @@ use crate::child::request::Route;
 use crate::child::request::ServerState;
 use crate::ffi::Pollable;
 use crate::state::ipc::VERSION_BYTES;
-use std::net::SocketAddr;
 
 //  #     #
 //  ##    #  ####  #####    ######  ####  #    # #    # #####     ##### ######  ####  #####  ####
@@ -31,7 +31,8 @@ fn test_not_found(
 
     target.enqueue_write(Ok(1));
 
-    handle_request(SyntheticRequestContext(state.clone()), &shared);
+    let context = SyntheticRequestContext(state.clone());
+    handle_request(context.clone(), context, &shared);
 
     let response = state.response.lock().take().expect("No response received");
 
@@ -84,7 +85,8 @@ fn handles_an_unauthorized_metrics_get_request() {
 
     TARGET.enqueue_write(Ok(1));
 
-    handle_request(SyntheticRequestContext(state.clone()), &shared);
+    let context = SyntheticRequestContext(state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         !STATE.ipc_requester.has_requests_pending(),
@@ -126,7 +128,8 @@ fn test_bad_auth_syntax(
 
     target.enqueue_write(Ok(1));
 
-    handle_request(SyntheticRequestContext(request_state.clone()), &shared);
+    let context = SyntheticRequestContext(request_state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         !state.ipc_requester.has_requests_pending(),
@@ -230,7 +233,8 @@ fn test_bad_auth_credentials(
 
     target.enqueue_write(Ok(1));
 
-    handle_request(SyntheticRequestContext(request_state.clone()), &shared);
+    let context = SyntheticRequestContext(request_state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         !state.ipc_requester.has_requests_pending(),
@@ -311,7 +315,8 @@ fn handles_an_authorized_metrics_get_request() {
         Some(b"Basic bWV0cmljczowMTIzNDU2Nzg5YWJjZGVm"),
     ));
 
-    handle_request(SyntheticRequestContext(state.clone()), &shared);
+    let context = SyntheticRequestContext(state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         STATE.ipc_requester.has_requests_pending(),
@@ -366,7 +371,8 @@ fn trims_whitespace_in_metrics_get_request() {
         Some(b"Basic    bWV0cmljczowMTIzNDU2Nzg5YWJjZGVm    "),
     ));
 
-    handle_request(SyntheticRequestContext(state.clone()), &shared);
+    let context = SyntheticRequestContext(state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         STATE.ipc_requester.has_requests_pending(),
@@ -411,7 +417,8 @@ fn handles_metrics_get_request_disconnects_early() {
         Some(b"Basic bWV0cmljczowMTIzNDU2Nzg5YWJjZGVm"),
     ));
 
-    handle_request(SyntheticRequestContext(state.clone()), &shared);
+    let context = SyntheticRequestContext(state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         !STATE.ipc_requester.has_requests_pending(),
@@ -455,7 +462,8 @@ fn handles_metrics_get_request_disconnects_late() {
     TARGET.enqueue_write(Ok(1));
     TARGET.enqueue_write(Ok(1));
 
-    handle_request(SyntheticRequestContext(state.clone()), &shared);
+    let context = SyntheticRequestContext(state.clone());
+    handle_request(context.clone(), context, &shared);
 
     assert!(
         STATE.ipc_requester.has_requests_pending(),
@@ -537,6 +545,7 @@ impl SyntheticRequestState {
     }
 }
 
+#[derive(Clone)]
 struct SyntheticRequestContext(Arc<SyntheticRequestState>);
 
 impl RequestContext for SyntheticRequestContext {
@@ -552,11 +561,12 @@ impl RequestContext for SyntheticRequestContext {
         self.0.received
     }
 
-    fn peer_addr(&self) -> &SocketAddr {
-        static TEST_ADDR: OnceCell<SocketAddr> = OnceCell::new();
-        TEST_ADDR.get_or_init(|| SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), 12345))
+    fn peer_addr(&self) -> std::net::Ipv6Addr {
+        std::net::Ipv6Addr::LOCALHOST
     }
+}
 
+impl ResponseContext for SyntheticRequestContext {
     fn respond(self, head: &'static ResponseHead, body: &[u8]) {
         let mut guard = self.0.response.lock();
 

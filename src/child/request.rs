@@ -4,10 +4,9 @@ use super::ipc::request_metrics;
 use super::ipc::IPCRequester;
 use super::limiter::Limiter;
 use crate::ffi::ImmutableWrite;
-use std::net::SocketAddr;
+use std::net::Ipv6Addr;
 
-#[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Clone, Copy))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
     InvalidMethod,
     InvalidPath,
@@ -29,21 +28,46 @@ pub struct ResponseHead {
     pub header_template: ResponseHeaderTemplate,
 }
 
-pub struct RequestShared<C: RequestContext + 'static, W: ImmutableWrite> {
+pub struct RequestShared<C: 'static, W> {
     pub state: &'static ServerState<C>,
     pub output: W,
     pub initialized: Instant,
 }
 
-pub trait RequestContext: Sized {
+pub struct StaticRequestContext {
+    pub authorization: Option<Box<[u8]>>,
+    pub received: Instant,
+    pub peer_addr: Ipv6Addr,
+    pub route: Route,
+}
+
+impl RequestContext for StaticRequestContext {
+    fn authorization(&self) -> Option<&[u8]> {
+        self.authorization.as_deref()
+    }
+    fn route(&self) -> Route {
+        self.route
+    }
+    fn received(&self) -> Instant {
+        self.received
+    }
+    fn peer_addr(&self) -> Ipv6Addr {
+        self.peer_addr
+    }
+}
+
+pub trait RequestContext {
     fn authorization(&self) -> Option<&[u8]>;
     fn route(&self) -> Route;
     fn received(&self) -> Instant;
-    fn peer_addr(&self) -> &SocketAddr;
+    fn peer_addr(&self) -> Ipv6Addr;
+}
+
+pub trait ResponseContext {
     fn respond(self, head: &'static ResponseHead, body: &[u8]);
 }
 
-pub struct ServerState<C: RequestContext> {
+pub struct ServerState<C> {
     pub key_set: RwLock<Option<KeySet>>,
     pub ipc_requester: IPCRequester<C>,
     pub limiter: Uncontended<Limiter>,
@@ -51,7 +75,7 @@ pub struct ServerState<C: RequestContext> {
     pub terminate_notify: Notify,
 }
 
-impl<C: RequestContext> ServerState<C> {
+impl<C: ResponseContext> ServerState<C> {
     pub const fn new() -> Self {
         Self {
             ipc_requester: IPCRequester::new(),
@@ -104,27 +128,28 @@ pub static RESPONSE_UNAVAILABLE: ResponseHead = ResponseHead {
 };
 
 // Very simplistic parsing. The username's hard-coded as it's just easier that way.
-fn handle_metrics_get<C: RequestContext + 'static>(
-    ctx: C,
+fn handle_metrics_get<C: ResponseContext + 'static>(
+    req: impl RequestContext,
+    res: C,
     shared: &RequestShared<C, impl ImmutableWrite>,
 ) -> Option<C> {
-    let Some(auth_header) = ctx.authorization() else {
-        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+    let Some(auth_header) = req.authorization() else {
+        res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
 
     let Some(rest) = auth_header.strip_prefix(b"Basic ") else {
-        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+        res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
 
     let Ok(rest) = std::str::from_utf8(rest) else {
-        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+        res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
 
     let Ok(mut decoded) = openssl::base64::decode_block(rest) else {
-        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+        res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
 
@@ -134,10 +159,10 @@ fn handle_metrics_get<C: RequestContext + 'static>(
         }
         _ => {
             if decoded.contains(&b':') {
-                ctx.respond(&RESPONSE_FORBIDDEN, &[]);
+                res.respond(&RESPONSE_FORBIDDEN, &[]);
                 return None;
             } else {
-                ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+                res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
                 return None;
             }
         }
@@ -152,44 +177,45 @@ fn handle_metrics_get<C: RequestContext + 'static>(
     let Some(key_set) = &*guard else {
         // No need to retain the lock while responding.
         drop(guard);
-        ctx.respond(&RESPONSE_FORBIDDEN, &[]);
+        res.respond(&RESPONSE_FORBIDDEN, &[]);
         return None;
     };
 
     if !key_set.check_key(password) {
         // No need to retain the lock while responding.
         drop(guard);
-        ctx.respond(&RESPONSE_FORBIDDEN, &[]);
+        res.respond(&RESPONSE_FORBIDDEN, &[]);
         return None;
     }
 
-    let diff = ctx.received().saturating_duration_since(shared.initialized);
+    let diff = req.received().saturating_duration_since(shared.initialized);
     let mut limiter = shared.state.limiter.lock();
 
-    if limiter.check_throttled(diff.as_secs(), ctx.peer_addr().ip()) {
+    if limiter.check_throttled(diff.as_secs(), req.peer_addr()) {
         drop(limiter);
-        ctx.respond(&RESPONSE_THROTTLED, &[]);
+        res.respond(&RESPONSE_THROTTLED, &[]);
         None
     } else {
-        Some(ctx)
+        Some(res)
     }
 }
 
-pub fn handle_request<C: RequestContext + 'static>(
-    ctx: C,
+pub fn handle_request<C: ResponseContext + 'static>(
+    req: impl RequestContext,
+    res: C,
     shared: &RequestShared<C, impl ImmutableWrite>,
 ) {
     if !super::ipc::send_msg(shared, &[ipc::child::TRACK_REQUEST]) {
-        ctx.respond(&RESPONSE_UNAVAILABLE, &[]);
+        res.respond(&RESPONSE_UNAVAILABLE, &[]);
         return;
     }
 
-    match ctx.route() {
-        Route::InvalidMethod => ctx.respond(&RESPONSE_METHOD_NOT_ALLOWED, &[]),
-        Route::InvalidPath => ctx.respond(&RESPONSE_NOT_FOUND, &[]),
+    match req.route() {
+        Route::InvalidMethod => res.respond(&RESPONSE_METHOD_NOT_ALLOWED, &[]),
+        Route::InvalidPath => res.respond(&RESPONSE_NOT_FOUND, &[]),
         Route::MetricsGet => {
-            if let Some(ctx) = handle_metrics_get(ctx, shared) {
-                request_metrics(ctx, shared);
+            if let Some(res) = handle_metrics_get(req, res, shared) {
+                request_metrics(res, shared);
             }
         }
     }
