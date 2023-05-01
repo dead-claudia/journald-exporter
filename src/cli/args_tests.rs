@@ -212,7 +212,7 @@ fn contains_child_process_returns_child() {
 
 #[test]
 fn plus_port_number_then_key_dir_flag_returns_missing_key_dir() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         for k in ["-k", "--key-dir"] {
             assert_eq!(
                 parse_args(&["journald-exporter", p, "+123", k]),
@@ -225,7 +225,7 @@ fn plus_port_number_then_key_dir_flag_returns_missing_key_dir() {
 
 #[test]
 fn plus_zero_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "+0"]),
             Err(ArgsError::InvalidPort),
@@ -236,7 +236,7 @@ fn plus_zero_port_number_returns_invalid_port() {
 
 #[test]
 fn unsigned_zero_port_number_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "0"]),
             Err(ArgsError::InvalidPort),
@@ -247,7 +247,7 @@ fn unsigned_zero_port_number_returns_invalid_port() {
 
 #[test]
 fn unsigned_port_number_out_of_range_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "100000"]),
             Err(ArgsError::InvalidPort),
@@ -258,7 +258,7 @@ fn unsigned_port_number_out_of_range_returns_invalid_port() {
 
 #[test]
 fn unsigned_port_number_way_out_of_range_returns_invalid_port() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "999999999999999999999999"]),
             Err(ArgsError::InvalidPort),
@@ -269,7 +269,7 @@ fn unsigned_port_number_way_out_of_range_returns_invalid_port() {
 
 #[test]
 fn plus_port_then_unknown_second_arg_fails_with_unknown_arg() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "+123", "bad argument"]),
             Err(ArgsError::UnknownFlag("bad argument".into())),
@@ -280,7 +280,7 @@ fn plus_port_then_unknown_second_arg_fails_with_unknown_arg() {
 
 #[test]
 fn unsigned_port_then_unknown_second_arg_fails_with_unknown_arg() {
-    for p in ["-p", "--port", "--child-process"] {
+    for p in ["-p", "--port"] {
         assert_eq!(
             parse_args(&["journald-exporter", p, "123", "bad argument"]),
             Err(ArgsError::UnknownFlag("bad argument".into())),
@@ -761,123 +761,143 @@ fn unsigned_16_bit_port_number_with_file_and_unknown_third_arg_fails_with_unknow
 }
 
 #[test]
-#[ignore]
 fn certificate_arg_requires_value() {
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "-c",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "-c"
-    );
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "--certificate",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "--certificate"
-    );
+    for c in ["-c", "--certificate"] {
+        assert_eq!(
+            parse_args(&[
+                "journald-exporter",
+                "--port",
+                "12345",
+                "--key-dir",
+                "some/file",
+                c,
+            ]),
+            Err(ArgsError::MissingCertificate),
+            "{c}"
+        );
+    }
 }
 
 #[test]
-#[ignore]
+fn certificate_arg_rejects_empty_value() {
+    for c in ["-c", "--certificate"] {
+        assert_eq!(
+            parse_args(&[
+                "journald-exporter",
+                "--port",
+                "12345",
+                "--key-dir",
+                "some/file",
+                c,
+                "",
+            ]),
+            Err(ArgsError::EmptyCertificate),
+            "{c}"
+        );
+    }
+}
+
+#[test]
 fn certificate_arg_requires_private_key_arg() {
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "-c",
-            "some/cert.pem",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "-c"
-    );
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "--certificate",
-            "some/cert.pem",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "--certificate"
-    );
+    for c in ["-c", "--certificate"] {
+        assert_eq!(
+            parse_args(&[
+                "journald-exporter",
+                "--port",
+                "12345",
+                "--key-dir",
+                "some/file",
+                c,
+                "some/cert.pem",
+            ]),
+            Err(ArgsError::MissingPrivateKey),
+            "{c}"
+        );
+    }
 }
 
 #[test]
-#[ignore]
 fn private_key_arg_requires_value() {
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "-K",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "-K"
-    );
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "--private-key",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "--private-key"
-    );
+    for p in ["-P", "--private-key"] {
+        assert_eq!(
+            parse_args(&[
+                "journald-exporter",
+                "--port",
+                "12345",
+                "--key-dir",
+                "some/file",
+                p,
+            ]),
+            Err(ArgsError::MissingPrivateKey),
+            "{p}"
+        );
+    }
 }
 
 #[test]
-#[ignore]
-fn private_key_arg_requires_certificate_arg() {
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "-K",
-            "some/key.pem",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "-K"
-    );
-    assert_eq!(
-        parse_args(&[
-            "journald-exporter",
-            "--port",
-            "12345",
-            "--key-dir",
-            "some/file",
-            "--private-key",
-            "some/key.pem",
-        ]),
-        Err(ArgsError::MissingPrivateKey),
-        "--private-key"
-    );
+fn private_key_arg_rejects_empty_value() {
+    for p in ["-P", "--private-key"] {
+        assert_eq!(
+            parse_args(&[
+                "journald-exporter",
+                "--port",
+                "12345",
+                "--key-dir",
+                "some/file",
+                p,
+                "",
+            ]),
+            Err(ArgsError::EmptyPrivateKey),
+            "{p}"
+        );
+    }
 }
 
-// TODO: add more certificate arg tests
+#[test]
+fn private_key_arg_requires_certificate_arg() {
+    for p in ["-P", "--private-key"] {
+        assert_eq!(
+            parse_args(&[
+                "journald-exporter",
+                "--port",
+                "12345",
+                "--key-dir",
+                "some/file",
+                p,
+                "some/key.pem",
+            ]),
+            Err(ArgsError::MissingCertificate),
+            "{p}"
+        );
+    }
+}
+
+#[test]
+fn certificate_arg_and_private_key_arg_returns_parent() {
+    for c in ["-c", "--certificate"] {
+        for p in ["-P", "--private-key"] {
+            assert_eq!(
+                parse_args(&[
+                    "journald-exporter",
+                    "--port",
+                    "12345",
+                    "--key-dir",
+                    "some/file",
+                    c,
+                    "some/cert.pem",
+                    p,
+                    "some/key.pem",
+                ]),
+                Ok(Args::Parent(ParentArgs {
+                    port: NonZeroU16::new(12345).unwrap(),
+                    key_dir: PathBuf::from("some/file"),
+                    tls: Some(TLSOptions {
+                        certificate: PathBuf::from("some/cert.pem"),
+                        private_key: PathBuf::from("some/key.pem"),
+                    })
+                })),
+                "{p}"
+            );
+        }
+    }
+}

@@ -30,13 +30,54 @@ impl ReadPhase {
 }
 
 #[derive(Debug)]
-pub struct SliceAccumulator<T> {
+pub struct KeyAccumulator {
     remaining: usize,
     // Use an option to mask when the vec failed to allocate.
-    data: Option<Vec<T>>,
+    data: Option<KeySetBuilder>,
 }
 
-impl<T> SliceAccumulator<T> {
+impl KeyAccumulator {
+    pub fn new(len: u32) -> Self {
+        Self {
+            remaining: zero_extend_u32_usize(len),
+            data: KeySetBuilder::try_reserve(zero_extend_u32_usize(len)),
+        }
+    }
+
+    pub fn has_remaining(&self) -> bool {
+        self.remaining != 0
+    }
+
+    pub fn finish(self) -> Option<KeySet> {
+        debug_assert_eq!(self.remaining, 0);
+        self.data.map(|d| d.finish())
+    }
+
+    pub fn push_raw(&mut self, value: &[u8]) {
+        match self.remaining.checked_sub(1) {
+            None => panic!("Overflowed slice buffer!"),
+            Some(remaining) => self.remaining = remaining,
+        }
+
+        if let Some(data) = &mut self.data {
+            // FIXME: change this to https://github.com/rust-lang/rust/issues/100486 to ensure the
+            // invariant that it never re-allocates is asserted.
+            // SAFETY: It's assumed valid.
+            unsafe {
+                data.push_raw(value);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ByteAccumulator {
+    remaining: usize,
+    // Use an option to mask when the vec failed to allocate.
+    data: Option<Vec<u8>>,
+}
+
+impl ByteAccumulator {
     pub fn new(len: u32) -> Self {
         Self {
             remaining: zero_extend_u32_usize(len),
@@ -53,30 +94,15 @@ impl<T> SliceAccumulator<T> {
         self.remaining != 0
     }
 
-    pub fn initialized(&self) -> &[T] {
+    pub fn initialized(&self) -> &[u8] {
         self.data.as_deref().unwrap_or(&[])
     }
 
-    pub fn finish(self) -> Option<Box<[T]>> {
+    pub fn finish(self) -> Option<Box<[u8]>> {
         debug_assert_eq!(self.remaining, 0);
         self.data.map(|d| d.into())
     }
 
-    pub fn push(&mut self, value: T) {
-        match self.remaining.checked_sub(1) {
-            None => panic!("Overflowed slice buffer!"),
-            Some(remaining) => self.remaining = remaining,
-        }
-
-        if let Some(data) = &mut self.data {
-            // FIXME: change this to https://github.com/rust-lang/rust/issues/100486 to ensure the
-            // invariant that it never re-allocates is asserted.
-            data.push(value);
-        }
-    }
-}
-
-impl SliceAccumulator<u8> {
     pub fn push_from_iter(&mut self, iter: &mut ReadIter) -> bool {
         if iter.buf.is_empty() {
             return false;
@@ -197,319 +223,9 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_phase_32_next_offset_0_returns_zero_values() {
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_0_returns_1_byte_values() {
-        let mut iter1 = ReadIter::new(&[0x12, 0x00, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x42, 0x00, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x12, 0x00, 0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x42));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_0_returns_2_byte_values() {
-        let mut iter1 = ReadIter::new(&[0x12, 0x34, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x9A, 0xBC, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x12, 0x34, 0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x0000BC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_0_returns_3_byte_values() {
-        let mut iter1 = ReadIter::new(&[0x12, 0x34, 0x56, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x9A, 0xBC, 0xDE, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x12, 0x34, 0x56, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x00DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_0_returns_4_byte_values() {
-        let mut iter1 = ReadIter::new(&[0x12, 0x34, 0x56, 0x78]);
-        let mut iter2 = ReadIter::new(&[0x9A, 0xBC, 0xDE, 0xF0]);
-        let mut iter3 = ReadIter::new(&[0x12, 0x34, 0x56, 0x78]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0xF0DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_1_returns_zero_values() {
-        let mut iter0 = ReadIter::new(&[0x00]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00, 0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_1_returns_1_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x00, 0x42]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x00, 0x12]);
-        let mut iter3 = ReadIter::new(&[0x00, 0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x42));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_1_returns_2_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12]);
-        let mut iter1 = ReadIter::new(&[0x34, 0x00, 0x00, 0x9A]);
-        let mut iter2 = ReadIter::new(&[0xBC, 0x00, 0x00, 0x12]);
-        let mut iter3 = ReadIter::new(&[0x34, 0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x0000BC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_1_returns_3_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12]);
-        let mut iter1 = ReadIter::new(&[0x34, 0x56, 0x00, 0x9A]);
-        let mut iter2 = ReadIter::new(&[0xBC, 0xDE, 0x00, 0x12]);
-        let mut iter3 = ReadIter::new(&[0x34, 0x56, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x00DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_1_returns_4_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12]);
-        let mut iter1 = ReadIter::new(&[0x34, 0x56, 0x78, 0x9A]);
-        let mut iter2 = ReadIter::new(&[0xBC, 0xDE, 0xF0, 0x12]);
-        let mut iter3 = ReadIter::new(&[0x34, 0x56, 0x78]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0xF0DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_2_returns_zero_values() {
-        let mut iter0 = ReadIter::new(&[0x00, 0x00]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_2_returns_1_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x00]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x42, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x12, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x42));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_2_returns_2_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x34]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x9A, 0xBC]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x12, 0x34]);
-        let mut iter3 = ReadIter::new(&[0x00, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x0000BC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_2_returns_3_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x34]);
-        let mut iter1 = ReadIter::new(&[0x56, 0x00, 0x9A, 0xBC]);
-        let mut iter2 = ReadIter::new(&[0xDE, 0x00, 0x12, 0x34]);
-        let mut iter3 = ReadIter::new(&[0x56, 0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x00DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_2_returns_4_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x34]);
-        let mut iter1 = ReadIter::new(&[0x56, 0x78, 0x9A, 0xBC]);
-        let mut iter2 = ReadIter::new(&[0xDE, 0xF0, 0x12, 0x34]);
-        let mut iter3 = ReadIter::new(&[0x56, 0x78]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0xF0DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_3_returns_zero_values() {
-        let mut iter0 = ReadIter::new(&[0x00, 0x00, 0x00]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x00, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_3_returns_1_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x00, 0x00]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x42, 0x00, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x12, 0x00, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x42));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x12));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_3_returns_2_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x34, 0x00]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x9A, 0xBC, 0x00]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x12, 0x34, 0x00]);
-        let mut iter3 = ReadIter::new(&[0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x0000BC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00003412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_3_returns_3_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x34, 0x56]);
-        let mut iter1 = ReadIter::new(&[0x00, 0x9A, 0xBC, 0xDE]);
-        let mut iter2 = ReadIter::new(&[0x00, 0x12, 0x34, 0x56]);
-        let mut iter3 = ReadIter::new(&[0x00]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0x00DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x00563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_phase_32_next_offset_3_returns_4_byte_values() {
-        let mut iter0 = ReadIter::new(&[0x12, 0x34, 0x56]);
-        let mut iter1 = ReadIter::new(&[0x78, 0x9A, 0xBC, 0xDE]);
-        let mut iter2 = ReadIter::new(&[0xF0, 0x12, 0x34, 0x56]);
-        let mut iter3 = ReadIter::new(&[0x78]);
-        let mut phase = ReadPhase::new();
-        assert_eq!(iter0.phase_next_32(&mut phase), None);
-        assert_eq!(iter1.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter1.phase_next_32(&mut phase), None);
-        assert_eq!(iter2.phase_next_32(&mut phase), Some(0xF0DEBC9A));
-        assert_eq!(iter2.phase_next_32(&mut phase), None);
-        assert_eq!(iter3.phase_next_32(&mut phase), Some(0x78563412));
-        assert_eq!(iter3.phase_next_32(&mut phase), None);
-    }
-
-    #[test]
-    fn read_iter_write_to_acc_at_start_reads_to_end_on_incomplete() {
+    fn read_iter_write_to_byte_acc_at_start_reads_to_end_on_incomplete() {
         let mut iter = ReadIter::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let mut target = SliceAccumulator::new(16);
+        let mut target = ByteAccumulator::new(16);
 
         assert_eq!(target.push_from_iter(&mut iter), true);
         assert_eq!(target.bytes_initialized(), 10);
@@ -518,9 +234,9 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_start_reads_to_end_on_exact() {
+    fn read_iter_write_to_byte_acc_at_start_reads_to_end_on_exact() {
         let mut iter = ReadIter::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let mut target = SliceAccumulator::new(10);
+        let mut target = ByteAccumulator::new(10);
 
         assert_eq!(target.push_from_iter(&mut iter), true);
         assert_eq!(target.bytes_initialized(), 10);
@@ -530,9 +246,9 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_start_reads_to_end_on_overflow() {
+    fn read_iter_write_to_byte_acc_at_start_reads_to_end_on_overflow() {
         let mut iter = ReadIter::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
-        let mut target = SliceAccumulator::new(10);
+        let mut target = ByteAccumulator::new(10);
 
         assert_eq!(target.push_from_iter(&mut iter), true);
         assert_eq!(target.bytes_initialized(), 10);
@@ -545,16 +261,16 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_start_empty_returns_err() {
-        let mut target = SliceAccumulator::new(10);
+    fn read_iter_write_to_byte_acc_at_start_empty_returns_err() {
+        let mut target = ByteAccumulator::new(10);
         assert_eq!(target.push_from_iter(&mut ReadIter::new(&[])), false);
         assert_eq!(target.bytes_initialized(), 0);
         assert_eq!(target.has_remaining(), true);
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_middle_reads_to_end_on_incomplete() {
-        let mut target = SliceAccumulator::new(16);
+    fn read_iter_write_to_byte_acc_at_middle_reads_to_end_on_incomplete() {
+        let mut target = ByteAccumulator::new(16);
         assert_eq!(target.push_from_iter(&mut ReadIter::new(b"ABC")), true);
 
         let mut iter = ReadIter::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
@@ -566,8 +282,8 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_middle_reads_to_end_on_exact() {
-        let mut target = SliceAccumulator::new(10);
+    fn read_iter_write_to_byte_acc_at_middle_reads_to_end_on_exact() {
+        let mut target = ByteAccumulator::new(10);
         assert_eq!(target.push_from_iter(&mut ReadIter::new(b"ABC")), true);
 
         let mut iter = ReadIter::new(&[1, 2, 3, 4, 5, 6, 7]);
@@ -583,8 +299,8 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_middle_reads_to_end_on_overflow() {
-        let mut target = SliceAccumulator::new(10);
+    fn read_iter_write_to_byte_acc_at_middle_reads_to_end_on_overflow() {
+        let mut target = ByteAccumulator::new(10);
         assert_eq!(target.push_from_iter(&mut ReadIter::new(b"ABC")), true);
 
         let mut iter = ReadIter::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
@@ -603,8 +319,8 @@ mod tests {
     }
 
     #[test]
-    fn read_iter_write_to_acc_at_middle_empty_returns_err() {
-        let mut target = SliceAccumulator::new(10);
+    fn read_iter_write_to_byte_acc_at_middle_empty_returns_err() {
+        let mut target = ByteAccumulator::new(10);
         assert_eq!(target.push_from_iter(&mut ReadIter::new(b"ABC")), true);
         assert_eq!(target.push_from_iter(&mut ReadIter::new(&[])), false);
         assert_eq!(target.bytes_initialized(), 3);

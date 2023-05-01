@@ -44,7 +44,7 @@ pub trait RequestContext: Sized {
 }
 
 pub struct ServerState<C: RequestContext> {
-    pub key_set: RwLock<KeySet>,
+    pub key_set: RwLock<Option<KeySet>>,
     pub ipc_requester: IPCRequester<C>,
     pub limiter: Uncontended<Limiter>,
     pub decoder: Uncontended<ipc::parent::Decoder>,
@@ -55,7 +55,7 @@ impl<C: RequestContext> ServerState<C> {
     pub const fn new() -> Self {
         Self {
             ipc_requester: IPCRequester::new(),
-            key_set: RwLock::new(KeySet::empty()),
+            key_set: RwLock::new(None),
             limiter: Uncontended::new(Limiter::new()),
             decoder: Uncontended::new(ipc::parent::Decoder::new()),
             terminate_notify: Notify::new(),
@@ -123,31 +123,25 @@ fn handle_metrics_get<C: RequestContext + 'static>(
         return None;
     };
 
-    let Ok(decoded) = openssl::base64::decode_block(rest) else {
+    let Ok(mut decoded) = openssl::base64::decode_block(rest) else {
         ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
 
-    if decoded.is_empty() {
-        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
-        return None;
-    }
-
-    let Some(password) = decoded.strip_prefix(b"metrics:") else {
-        // Require a username, but treat passwords as optional for the purpose of authentication.
-        if matches!(decoded.first(), None | Some(&b':')) {
-            ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
-            return None;
-        } else {
-            ctx.respond(&RESPONSE_FORBIDDEN, &[]);
-            return None;
+    let password = match decoded.as_mut_slice() {
+        [b'm', b'e', b't', b'r', b'i', b'c', b's', b':', password @ ..] if !password.is_empty() => {
+            password
+        }
+        _ => {
+            if decoded.contains(&b':') {
+                ctx.respond(&RESPONSE_FORBIDDEN, &[]);
+                return None;
+            } else {
+                ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+                return None;
+            }
         }
     };
-
-    if password.is_empty() {
-        ctx.respond(&RESPONSE_FORBIDDEN, &[]);
-        return None;
-    }
 
     let guard = shared
         .state
@@ -155,7 +149,14 @@ fn handle_metrics_get<C: RequestContext + 'static>(
         .read()
         .unwrap_or_else(|e| e.into_inner());
 
-    if !guard.check_key(password) {
+    let Some(key_set) = &*guard else {
+        // No need to retain the lock while responding.
+        drop(guard);
+        ctx.respond(&RESPONSE_FORBIDDEN, &[]);
+        return None;
+    };
+
+    if !key_set.check_key(password) {
         // No need to retain the lock while responding.
         drop(guard);
         ctx.respond(&RESPONSE_FORBIDDEN, &[]);

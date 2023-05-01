@@ -1,5 +1,6 @@
 mod ascii;
 mod assert_not_miri;
+mod clear;
 mod counter;
 mod error;
 mod failable_box;
@@ -13,6 +14,7 @@ mod uncontended;
 
 pub use self::ascii::*;
 pub use self::assert_not_miri::*;
+pub use self::clear::*;
 pub use self::counter::*;
 pub use self::error::*;
 pub use self::failable_box::*;

@@ -79,6 +79,20 @@ impl fmt::Debug for DebugBigSlice<'_> {
     }
 }
 
+// Based on Rust's version, but works on byte slices instead.
+// TODO: remove once https://github.com/rust-lang/rust/issues/94035 stabilizes.
+pub const fn trim_ascii(mut data: &[u8]) -> &[u8] {
+    while let [b'\x09' | b'\x0A' | b'\x0C' | b'\x0D' | b' ', rest @ ..] = data {
+        data = rest;
+    }
+
+    while let [rest @ .., b'\x09' | b'\x0A' | b'\x0C' | b'\x0D' | b' '] = data {
+        data = rest;
+    }
+
+    data
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

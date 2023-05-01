@@ -197,6 +197,22 @@ fn handles_invalid_base64_authorization_in_metrics_get_request() {
     test_bad_auth_syntax(&TARGET, &STATE, b"Basic ???");
 }
 
+#[test]
+fn handles_wrong_username_missing_password_in_metrics_get_request() {
+    static TARGET: WriteSpy = WriteSpy::new("TARGET");
+    static STATE: ServerState<SyntheticRequestContext> = ServerState::new();
+    // Decoded: `bad`
+    test_bad_auth_syntax(&TARGET, &STATE, b"Basic YmFk");
+}
+
+#[test]
+fn handles_right_username_missing_password_in_metrics_get_request() {
+    static TARGET: WriteSpy = WriteSpy::new("TARGET");
+    static STATE: ServerState<SyntheticRequestContext> = ServerState::new();
+    // Decoded: `metrics`
+    test_bad_auth_syntax(&TARGET, &STATE, b"Basic bWV0cmljcw==");
+}
+
 fn test_bad_auth_credentials(
     target: &'static WriteSpy,
     state: &'static ServerState<SyntheticRequestContext>,
@@ -244,27 +260,11 @@ fn test_bad_auth_credentials(
 }
 
 #[test]
-fn handles_wrong_username_missing_password_in_metrics_get_request() {
-    static TARGET: WriteSpy = WriteSpy::new("TARGET");
-    static STATE: ServerState<SyntheticRequestContext> = ServerState::new();
-    // Decoded: `bad`
-    test_bad_auth_credentials(&TARGET, &STATE, b"Basic YmFk");
-}
-
-#[test]
 fn handles_bad_username_in_metrics_get_request() {
     static TARGET: WriteSpy = WriteSpy::new("TARGET");
     static STATE: ServerState<SyntheticRequestContext> = ServerState::new();
     // Decoded: `bad:0123456789abcdef`
     test_bad_auth_credentials(&TARGET, &STATE, b"Basic YmFkOjAxMjM0NTY3ODlhYmNkZWY=");
-}
-
-#[test]
-fn handles_right_username_missing_password_in_metrics_get_request() {
-    static TARGET: WriteSpy = WriteSpy::new("TARGET");
-    static STATE: ServerState<SyntheticRequestContext> = ServerState::new();
-    // Decoded: `metrics`
-    test_bad_auth_credentials(&TARGET, &STATE, b"Basic bWV0cmljcw==");
 }
 
 #[test]
@@ -500,11 +500,11 @@ fn make_shared(
     keys: &[&[u8]],
 ) -> RequestShared<SyntheticRequestContext, &'static WriteSpy> {
     let mut guard = state.key_set.write().unwrap_or_else(|e| e.into_inner());
-    *guard = KeySet::new(
-        keys.iter()
-            .map(|k| Key::from_hex(k).unwrap())
-            .collect::<Box<_>>(),
-    );
+    *guard = if keys.is_empty() {
+        None
+    } else {
+        Some(KeySet::build(keys))
+    };
 
     RequestShared {
         state,
