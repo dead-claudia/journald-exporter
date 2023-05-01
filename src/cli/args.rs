@@ -25,7 +25,7 @@ pub struct ParentArgs {
 
 #[derive(Debug, PartialEq)]
 pub enum Args {
-    Child(ChildArgs),
+    Child,
     Parent(ParentArgs),
 }
 
@@ -73,14 +73,12 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
         Initial,
         ExpectParentPort,
         ExpectKeyDir,
-        ExpectChildPort,
         ExpectCertificate,
         ExpectPrivateKey,
     }
 
     let mut state = ArgState::Initial;
 
-    let mut child_port = None::<NonZeroU16>;
     let mut parent_port = None::<NonZeroU16>;
     let mut key_dir = None::<PathBuf>;
     let mut certificate = None::<PathBuf>;
@@ -96,7 +94,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 Some("-k" | "--key-dir") => state = ArgState::ExpectKeyDir,
                 Some("-c" | "--certificate") => state = ArgState::ExpectCertificate,
                 Some("-P" | "--private-key") => state = ArgState::ExpectPrivateKey,
-                Some("--child-process") => state = ArgState::ExpectChildPort,
+                Some("--child-process") => return Ok(Args::Child),
                 _ => return Err(ArgsError::UnknownFlag(arg)),
             },
             ArgState::ExpectParentPort => match arg.to_str() {
@@ -118,17 +116,6 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 key_dir = Some(PathBuf::from(arg));
                 state = ArgState::Initial;
             }
-            ArgState::ExpectChildPort => match arg.to_str() {
-                None => return Err(ArgsError::InvalidPort),
-                // Parse it as a port number
-                Some(value) => match value.parse() {
-                    Err(_) => return Err(ArgsError::InvalidPort),
-                    Ok(port) => {
-                        child_port = Some(port);
-                        state = ArgState::Initial;
-                    }
-                },
-            },
             ArgState::ExpectCertificate => {
                 if arg.is_empty() {
                     return Err(ArgsError::EmptyCertificate);
@@ -160,22 +147,16 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 }),
             };
 
-            match child_port {
-                Some(port) => Ok(Args::Child(ChildArgs { port })),
-                None => match (parent_port, key_dir) {
-                    // Show help if no arguments are given.
-                    (None, None) => Err(ArgsError::ShowHelp),
-                    (None, Some(_)) => Err(ArgsError::MissingPort),
-                    (Some(_), None) => Err(ArgsError::MissingKeyDir),
-                    (Some(port), Some(key_dir)) => {
-                        Ok(Args::Parent(ParentArgs { port, key_dir, tls }))
-                    }
-                },
+            match (parent_port, key_dir) {
+                // Show help if no arguments are given.
+                (None, None) => Err(ArgsError::ShowHelp),
+                (None, Some(_)) => Err(ArgsError::MissingPort),
+                (Some(_), None) => Err(ArgsError::MissingKeyDir),
+                (Some(port), Some(key_dir)) => Ok(Args::Parent(ParentArgs { port, key_dir, tls })),
             }
         }
         ArgState::ExpectParentPort => Err(ArgsError::MissingPort),
         ArgState::ExpectKeyDir => Err(ArgsError::MissingKeyDir),
-        ArgState::ExpectChildPort => Err(ArgsError::MissingPort),
         ArgState::ExpectCertificate => Err(ArgsError::EmptyCertificate),
         ArgState::ExpectPrivateKey => Err(ArgsError::EmptyPrivateKey),
     }

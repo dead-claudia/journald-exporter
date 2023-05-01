@@ -145,12 +145,16 @@ impl ParentIpcMethods for NativeIpcMethods {
         );
 
         command.arg("--child-process");
-        command.arg(std::ffi::OsStr::from_bytes(&port_bytes[port_bytes_start..]));
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::inherit());
         command.uid(ipc_dynamic.child_user_group.uid);
         command.gid(ipc_dynamic.child_user_group.gid);
+
+        command.env(
+            "PORT",
+            std::ffi::OsStr::from_bytes(&port_bytes[port_bytes_start..]),
+        );
 
         if let Some(tls_options) = &ipc_dynamic.tls_config {
             command.env("TLS_CERTIFICATE", &tls_options.certificate);

@@ -4,35 +4,25 @@ use super::ipc::*;
 use super::request::*;
 use super::server::TinyHttpRequestContext;
 use super::PENDING_REQUEST_CAPACITY;
-use crate::cli::args::ChildArgs;
 use crate::ffi::set_non_blocking;
 use crate::ffi::ExitCode;
 use crate::ffi::ExitResult;
 use std::net::Ipv4Addr;
 use std::net::TcpListener;
+use std::num::NonZeroU16;
+use std::os::unix::prelude::OsStrExt;
 use std::os::unix::prelude::OsStringExt;
 
 static SERVER_STATE: ServerState<TinyHttpRequestContext> = ServerState::new();
 static REQUEST_CHANNEL: Channel<TinyHttpRequestContext, PENDING_REQUEST_CAPACITY> = Channel::new();
 
-fn cli_invariant_failed(s: &str) -> ! {
-    let mut stderr = std::io::stderr().lock();
-    let mut buf = s.as_bytes();
-    while !buf.is_empty() {
-        match stderr.write(buf) {
-            Ok(size) => buf = &buf[size..],
-            Err(e) => match e.kind() {
-                ErrorKind::WouldBlock => {}
-                ErrorKind::Interrupted => {}
-                _ => std::process::abort(),
-            },
-        }
-    }
-    drop(stderr.flush());
-    std::process::abort();
+fn get_port() -> Option<NonZeroU16> {
+    let result = std::env::var_os("PORT")?;
+    let port_num = parse_u32(result.as_bytes())?;
+    NonZeroU16::new(u16::try_from(port_num).ok()?)
 }
 
-pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
+pub fn start_child() -> io::Result<ExitResult> {
     // Set the standard input and output to non-blocking mode so reads will correctly not block.
     set_non_blocking(libc::STDIN_FILENO);
     set_non_blocking(libc::STDOUT_FILENO);
@@ -46,6 +36,11 @@ pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
         initialized: Instant::now(),
     };
 
+    let port = match get_port() {
+        Some(port) => port,
+        None => return Err(error!("Port is invalid or missing.")),
+    };
+
     let tls = match (
         std::env::var_os("TLS_CERTIFICATE"),
         std::env::var_os("TLS_PRIVATE_KEY"),
@@ -55,22 +50,22 @@ pub fn start_child(args: ChildArgs) -> io::Result<ExitResult> {
             private_key: private_key.into_vec(),
         }),
         (None, None) => None,
-        (None, Some(_)) => cli_invariant_failed("Received private key but not certificate.\n"),
-        (Some(_), None) => cli_invariant_failed("Received certificate but not private key.\n"),
+        (None, Some(_)) => return Err(error!("Received private key but not certificate.")),
+        (Some(_), None) => return Err(error!("Received certificate but not private key.")),
     };
 
-    let listener = match TcpListener::bind((Ipv4Addr::UNSPECIFIED, args.port.into())) {
+    let listener = match TcpListener::bind((Ipv4Addr::UNSPECIFIED, port.into())) {
         Ok(listener) => listener,
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             return Err(error!(
                 ErrorKind::AddrInUse,
-                "TCP port {} is already in use.", args.port
+                "TCP port {port} is already in use."
             ))
         }
         Err(e) => return Err(e),
     };
 
-    log::info!("Server listener bound at port {}.", args.port);
+    log::info!("Server listener bound at port {port}.");
 
     let server = match tiny_http::Server::from_listener(listener, tls) {
         Ok(server) => server,
