@@ -93,6 +93,30 @@ pub const fn trim_ascii(mut data: &[u8]) -> &[u8] {
     data
 }
 
+// Like above, but for the `Authorization` field for headers. This trims two characters:
+// - Non-newline whitespace, as that's semantically irrelevant for the header (newlines can't
+//   appear, due to HTTP header syntax)
+// - Up to 2 trailing pad characters, depending on the length of `data`, as that's optional.
+pub fn trim_auth_token(mut data: &[u8]) -> &[u8] {
+    while let [b'\t' | b'\x0C' | b' ', rest @ ..] = data {
+        data = rest;
+    }
+    while let [rest @ .., b'\t' | b'\x0C' | b' '] = data {
+        data = rest;
+    }
+
+    match (data.len() % 4, data) {
+        // NN==
+        (0, [head @ .., b'=', b'=']) => head,
+        // NNN=
+        (0, [head @ .., b'=']) => head,
+        // NN=
+        (3, [head @ .., b'=']) => head,
+        // Anything else
+        _ => data,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,8 @@ use super::ipc::request_metrics;
 use super::ipc::IPCRequester;
 use super::limiter::Limiter;
 use crate::ffi::ImmutableWrite;
+use base64::engine::general_purpose::STANDARD_NO_PAD as ENGINE;
+use base64::engine::Engine as _;
 use std::net::Ipv6Addr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,17 +145,21 @@ fn handle_metrics_get<C: ResponseContext + 'static>(
         return None;
     };
 
-    let Ok(rest) = std::str::from_utf8(rest) else {
+    let rest = trim_auth_token(rest);
+
+    // 0 = empty
+    // 1 = invalid Base64
+    if rest.len() <= 1 {
+        res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+        return None;
+    }
+
+    let Ok(decoded) = ENGINE.decode(rest) else {
         res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
 
-    let Ok(mut decoded) = openssl::base64::decode_block(rest) else {
-        res.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
-        return None;
-    };
-
-    let password = match decoded.as_mut_slice() {
+    let password = match decoded.as_slice() {
         [b'm', b'e', b't', b'r', b'i', b'c', b's', b':', password @ ..] if !password.is_empty() => {
             password
         }
@@ -187,6 +193,8 @@ fn handle_metrics_get<C: ResponseContext + 'static>(
         res.respond(&RESPONSE_FORBIDDEN, &[]);
         return None;
     }
+
+    drop(decoded);
 
     let diff = req.received().saturating_duration_since(shared.initialized);
     let mut limiter = shared.state.limiter.lock();
