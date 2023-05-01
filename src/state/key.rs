@@ -19,12 +19,6 @@ pub struct Key {
     raw: [u8; MAX_KEY_LEN],
 }
 
-impl zeroize::Zeroize for Key {
-    fn zeroize(&mut self) {
-        self.raw.zeroize();
-    }
-}
-
 impl fmt::Debug for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Key({:?})", BinaryToDebug(self.insecure_get_value()))
@@ -57,95 +51,154 @@ impl Key {
         let key_len = self.raw.iter().position(|c| *c == 0).unwrap_or(MAX_KEY_LEN);
         &self.raw[..key_len]
     }
+}
 
-    pub fn from_hex(hex: &[u8]) -> Option<Key> {
-        if is_valid_hex_string(hex) {
-            let mut raw = [0_u8; MAX_KEY_LEN];
-            for (target, source) in raw.iter_mut().zip(hex) {
-                *target = normalize_hex(*source);
-            }
-            Some(Key { raw })
-        } else {
-            None
+#[derive(Debug)]
+pub struct KeySetBuilder {
+    key_set: Vec<Key>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyPushResult {
+    Success,
+    Invalid,
+    TooManyKeys,
+}
+
+impl KeySetBuilder {
+    pub fn new() -> Self {
+        Self {
+            key_set: Vec::new(),
         }
     }
 
-    #[track_caller]
-    pub fn from_raw(b: &[u8]) -> Key {
-        match Self::from_hex(b) {
-            Some(key) => key,
-            None => panic_invalid_length(b.len()),
+    pub fn try_reserve(len: usize) -> Option<Self> {
+        Some(Self {
+            key_set: try_new_dynamic_vec(len)?,
+        })
+    }
+
+    #[must_use]
+    pub fn push_hex(&mut self, key: &[u8]) -> KeyPushResult {
+        if !is_valid_hex_string(key) {
+            KeyPushResult::Invalid
+        } else if self.key_set.len() == MAX_KEY_SET_LEN {
+            KeyPushResult::TooManyKeys
+        } else {
+            // SAFETY: It's validated to be correct.
+            unsafe { self.push_raw(key) }
+            KeyPushResult::Success
+        }
+    }
+
+    /// Safety note: `key` must be validated to satisfy the following constraints:
+    /// - The slice itself is non-empty.
+    /// - The slice contains at most 64 characters.
+    /// - The slice is of even length.
+    /// - The slice's contents consist of only hexadecimal digits.
+    pub unsafe fn push_raw(&mut self, key: &[u8]) {
+        debug_assert!(key.len() < MAX_KEY_LEN);
+
+        let tail = self.key_set.len();
+        if tail == MAX_KEY_SET_LEN {
+            unreachable!();
+        }
+
+        self.key_set.reserve(1);
+        // SAFETY: Push the key to the set while ensuring it's never written to the stack.
+        let mut dest = self.key_set.as_mut_ptr().add(tail).cast::<u8>();
+        debug_assert_eq!(dest.align_offset(std::mem::align_of::<Key>()), 0);
+        for byte in key.iter() {
+            *dest = normalize_hex(*byte);
+            dest = dest.add(1);
+        }
+        for _ in key.len()..=MAX_KEY_LEN {
+            *dest = 0;
+            dest = dest.add(1);
+        }
+        self.key_set.set_len(tail.wrapping_add(1));
+    }
+
+    pub fn finish(self) -> KeySet {
+        // SAFETY: Bypassing the drop logic, to avoid clearing the inner vector.
+        let key_set = unsafe {
+            let this = std::mem::ManuallyDrop::new(self);
+            std::ptr::read(&this.key_set)
+        };
+        KeySet {
+            key_set: key_set.into(),
         }
     }
 }
 
-#[cold]
-#[inline(never)]
-#[track_caller]
-fn panic_invalid_length(len: usize) -> ! {
-    if len == 0 {
-        panic!("Key must not be empty.");
+impl Drop for KeySetBuilder {
+    fn drop(&mut self) {
+        // SAFETY: All zeroes are valid for keys.
+        unsafe {
+            secure_clear(&mut self.key_set);
+        }
     }
-    if len > MAX_KEY_LEN {
-        panic!("Key length must be at most 256 bytes, but found {len}.");
-    }
-    if len % 2 != 0 {
-        panic!("Key length must be even, but found {len}.");
-    }
-    panic!("Key length must only contain hex characters.");
 }
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct KeySet {
-    key_set: Option<zeroize::Zeroizing<Box<[Key]>>>,
+    key_set: Box<[Key]>,
+}
+
+impl Drop for KeySet {
+    fn drop(&mut self) {
+        // SAFETY: All zeroes are valid for keys.
+        unsafe {
+            secure_clear(&mut self.key_set);
+        }
+    }
 }
 
 impl KeySet {
-    pub const fn empty() -> KeySet {
-        KeySet { key_set: None }
-    }
-
-    pub fn new(b: Box<[Key]>) -> KeySet {
-        assert!(b.len() <= MAX_KEY_SET_LEN);
-        KeySet {
-            key_set: if b.is_empty() {
-                None
-            } else {
-                Some(zeroize::Zeroizing::new(b))
-            },
-        }
-    }
-
     #[cfg(test)]
-    pub fn build(keys: impl IntoIterator<Item = Key>) -> KeySet {
-        Self::new(keys.into_iter().collect())
+    pub fn build(keys: &[&[u8]]) -> Self {
+        let mut builder = KeySetBuilder::new();
+        assert!(
+            keys.len() <= MAX_KEY_SET_LEN,
+            "Too many keys: {}",
+            keys.len()
+        );
+        for key in keys {
+            match builder.push_hex(key) {
+                KeyPushResult::Success => {}
+                KeyPushResult::Invalid => panic!("Key is invalid: {:?}", BinaryToDebug(key)),
+                // Should've been validated already.
+                KeyPushResult::TooManyKeys => unreachable!(),
+            }
+        }
+        builder.finish()
     }
 
-    pub fn into_insecure_view_keys(self) -> zeroize::Zeroizing<Box<[Key]>> {
-        self.key_set
-            .unwrap_or_else(|| zeroize::Zeroizing::new(Box::new([])))
+    pub fn insecure_view_keys(&self) -> &[Key] {
+        &self.key_set
     }
 
     pub fn check_key(&self, key: &[u8]) -> bool {
         // Check for correct syntax. This part isn't security-critical.
-        let Some(input_key) = Key::from_hex(key) else {
+        if !is_valid_hex_string(key) {
             return false;
-        };
-
-        let Some(key_set) = &self.key_set else {
-            return false;
-        };
+        }
 
         // This is specially designed to avoid detection of both key length and matched key (if
         // multiple keys are available).
 
         let mut match_found = false;
 
-        for trusted_key in key_set.iter() {
-            match_found = std::hint::black_box(
-                match_found | openssl::memcmp::eq(&input_key.raw, &trusted_key.raw),
-            );
+        for trusted_key in self.key_set.iter() {
+            let mut current_matched = true;
+
+            for (&left, &right) in key.iter().zip(&trusted_key.raw) {
+                current_matched =
+                    std::hint::black_box(current_matched & (normalize_hex(left) == right));
+            }
+
+            match_found = std::hint::black_box(match_found | current_matched);
         }
 
         std::hint::black_box(match_found)
@@ -158,106 +211,106 @@ mod tests {
 
     #[test]
     fn does_not_create_key_from_invalid_hex_string_of_even_length() {
-        assert!(Key::from_hex(b"definitely a non-hex string with even length").is_none());
+        let mut builder = KeySetBuilder::new();
+        assert_eq!(
+            builder.push_hex(b"definitely a non-hex string with even length"),
+            KeyPushResult::Invalid
+        );
     }
 
     #[test]
     fn does_not_create_key_from_invalid_hex_string_of_odd_length() {
-        assert!(Key::from_hex(b"definitely a non-hex string with odd length").is_none());
+        let mut builder = KeySetBuilder::new();
+        assert_eq!(
+            builder.push_hex(b"definitely a non-hex string with odd length"),
+            KeyPushResult::Invalid
+        );
     }
 
     #[test]
     fn does_not_create_key_from_hex_only_string_of_odd_length() {
-        assert!(Key::from_hex(b"0123456789abcdef1").is_none());
+        let mut builder = KeySetBuilder::new();
+        assert_eq!(
+            builder.push_hex(b"0123456789abcdef1"),
+            KeyPushResult::Invalid
+        );
     }
 
     #[test]
     fn rejects_if_empty_set() {
-        let key_set = KeySet::empty();
+        let key_set = KeySet::build(&[]);
         assert!(!key_set.check_key(b"definitely a non-hex string with even length"));
     }
 
     #[test]
     fn rejects_non_hex_keys_with_even_length() {
-        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
+        let key_set = KeySet::build(&[b"abcdef0123456789"]);
         assert!(!key_set.check_key(b"definitely a non-hex string with even length"));
     }
 
     #[test]
     fn rejects_non_hex_keys_with_odd_length() {
-        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
+        let key_set = KeySet::build(&[b"abcdef0123456789"]);
         assert!(!key_set.check_key(b"definitely a non-hex string with odd length"));
     }
 
     #[test]
     fn rejects_hex_keys_with_odd_length() {
-        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
+        let key_set = KeySet::build(&[b"abcdef0123456789"]);
         assert!(!key_set.check_key(b"0123456789abcdef1"));
     }
 
     #[test]
     fn checks_hex_lower_against_single_hex_lower_match() {
-        let key_set = KeySet::build([Key::from_hex(b"0123456789abcdef").unwrap()]);
+        let key_set = KeySet::build(&[b"0123456789abcdef"]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_hex_lower_against_single_hex_upper_match() {
-        let key_set = KeySet::build([Key::from_hex(b"0123456789ABCDEF").unwrap()]);
+        let key_set = KeySet::build(&[b"0123456789ABCDEF"]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_hex_upper_against_single_hex_lower_match() {
-        let key_set = KeySet::build([Key::from_hex(b"0123456789abcdef").unwrap()]);
+        let key_set = KeySet::build(&[b"0123456789abcdef"]);
         assert!(key_set.check_key(b"0123456789ABCDEF"));
     }
 
     #[test]
     fn checks_hex_upper_against_single_hex_upper_match() {
-        let key_set = KeySet::build([Key::from_hex(b"0123456789ABCDEF").unwrap()]);
+        let key_set = KeySet::build(&[b"0123456789ABCDEF"]);
         assert!(key_set.check_key(b"0123456789ABCDEF"));
     }
 
     #[test]
     fn rejects_against_single_mismatch() {
-        let key_set = KeySet::build([Key::from_hex(b"abcdef0123456789").unwrap()]);
+        let key_set = KeySet::build(&[b"abcdef0123456789"]);
         assert!(!key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_against_multi_match_one() {
-        let key_set = KeySet::build([
-            Key::from_hex(b"0123456789abcdef").unwrap(),
-            Key::from_hex(b"aaaaaaaaaaaaaaaa").unwrap(),
-        ]);
+        let key_set = KeySet::build(&[b"0123456789abcdef", b"aaaaaaaaaaaaaaaa"]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_against_multi_match_second() {
-        let key_set = KeySet::build([
-            Key::from_hex(b"aaaaaaaaaaaaaaaa").unwrap(),
-            Key::from_hex(b"0123456789abcdef").unwrap(),
-        ]);
+        let key_set = KeySet::build(&[b"aaaaaaaaaaaaaaaa", b"0123456789abcdef"]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn checks_against_multi_match_all() {
-        let key_set = KeySet::build([
-            Key::from_hex(b"0123456789abcdef").unwrap(),
-            Key::from_hex(b"0123456789abcdef").unwrap(),
-        ]);
+        let key_set = KeySet::build(&[b"0123456789abcdef", b"0123456789abcdef"]);
         assert!(key_set.check_key(b"0123456789abcdef"));
     }
 
     #[test]
     fn rejects_against_multi_match_none() {
-        let key_set = KeySet::build([
-            Key::from_hex(b"abcdef0123456789").unwrap(),
-            Key::from_hex(b"aaaaaaaaaaaaaaaa").unwrap(),
-        ]);
+        let key_set = KeySet::build(&[b"abcdef0123456789", b"aaaaaaaaaaaaaaaa"]);
         assert!(!key_set.check_key(b"0123456789abcdef"));
     }
 }

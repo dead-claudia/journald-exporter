@@ -52,7 +52,7 @@ fn handle_key_set_response(
             log::error!("Child key set response allocation failed. Retaining current keys.");
         }
         ResponseItem::Some(keys) => {
-            *state.key_set.write().unwrap_or_else(|e| e.into_inner()) = keys;
+            *state.key_set.write().unwrap_or_else(|e| e.into_inner()) = Some(keys);
         }
     }
 }

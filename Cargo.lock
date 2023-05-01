@@ -293,7 +293,6 @@ dependencies = [
  "quickcheck_macros",
  "tempfile",
  "tiny_http",
- "zeroize",
 ]
 
 [[package]]

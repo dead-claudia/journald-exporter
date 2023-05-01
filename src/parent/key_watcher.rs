@@ -30,7 +30,7 @@ impl KeyWatcherTarget {
     }
 
     fn get_current_key_set(&self) -> io::Result<Box<[u8]>> {
-        let mut next = Vec::new();
+        let mut builder = KeySetBuilder::new();
 
         let dir_metadata = std::fs::metadata(&self.key_dir)?;
 
@@ -60,11 +60,8 @@ impl KeyWatcherTarget {
                 }
             };
 
-            match process_path(&entry) {
-                Ok(key) => {
-                    log::info!("API key detected at path: {}", file_name.display());
-                    next.push(key);
-                }
+            match process_path(&mut builder, &entry, &file_name) {
+                Ok(()) => log::info!("API key detected at path: {}", file_name.display()),
                 // Tolerate it. May have just been removed right after the threshold.
                 Err(e) if e.kind() == ErrorKind::NotFound => {}
                 // Log it and silently ignore it. Easier to debug and less intrusive overall, and
@@ -74,7 +71,7 @@ impl KeyWatcherTarget {
             }
         }
 
-        Ok(ipc::parent::receive_key_set_bytes(KeySet::new(next.into())))
+        Ok(ipc::parent::receive_key_set_bytes(builder.finish()))
     }
 }
 
@@ -187,7 +184,11 @@ fn report_insecure(metadata: std::fs::Metadata) -> Error {
     )
 }
 
-fn process_path(entry: &std::fs::DirEntry) -> io::Result<Key> {
+fn process_path(
+    builder: &mut KeySetBuilder,
+    entry: &std::fs::DirEntry,
+    path: &Path,
+) -> io::Result<()> {
     let metadata = entry.metadata()?;
 
     if !metadata.file_type().is_file() {
@@ -208,9 +209,27 @@ fn process_path(entry: &std::fs::DirEntry) -> io::Result<Key> {
         return Err(report_insecure(metadata));
     }
 
-    let key_data = std::fs::read_to_string(entry.path())?;
-    Key::from_hex(key_data.trim().as_bytes())
-        .ok_or_else(|| error!("File contents are not a valid key"))
+    struct ZeroOnDrop(Vec<u8>);
+
+    impl Drop for ZeroOnDrop {
+        fn drop(&mut self) {
+            secure_clear_bytes(&mut self.0);
+        }
+    }
+
+    let key_data = ZeroOnDrop(std::fs::read(entry.path())?);
+
+    match builder.push_hex(trim_ascii(&key_data.0)) {
+        KeyPushResult::Success => Ok(()),
+        KeyPushResult::Invalid => Err(error!("File contents are not a valid key.")),
+        KeyPushResult::TooManyKeys => {
+            log::error!(
+                "Only up to 255 keys are supported. Ignoring key from {}.",
+                path.display()
+            );
+            Ok(())
+        }
+    }
 }
 
 fn is_update_event(event: &notify::Event) -> bool {
@@ -429,9 +448,9 @@ mod tests {
             &mut expected,
             &[
                 &[0x01, truncate_u32_u8(files.count_ones())],
-                select_file(files, FILE_TEST_KEY, b"\x0F0123456789abcdef"),
-                select_file(files, FILE_TEST_KEY_2, b"\x0F76543210fedcba98"),
-                select_file(files, FILE_OTHER_KEY, b"\x0Ffedcba9876543210"),
+                select_file(files, FILE_TEST_KEY, b"\x100123456789abcdef"),
+                select_file(files, FILE_TEST_KEY_2, b"\x1076543210fedcba98"),
+                select_file(files, FILE_OTHER_KEY, b"\x10fedcba9876543210"),
             ],
         );
 

@@ -157,7 +157,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
         }
         ArgState::ExpectParentPort => Err(ArgsError::MissingPort),
         ArgState::ExpectKeyDir => Err(ArgsError::MissingKeyDir),
-        ArgState::ExpectCertificate => Err(ArgsError::EmptyCertificate),
-        ArgState::ExpectPrivateKey => Err(ArgsError::EmptyPrivateKey),
+        ArgState::ExpectCertificate => Err(ArgsError::MissingCertificate),
+        ArgState::ExpectPrivateKey => Err(ArgsError::MissingPrivateKey),
     }
 }

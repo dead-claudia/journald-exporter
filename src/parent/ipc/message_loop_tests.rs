@@ -96,10 +96,7 @@ fn read_header_then_request_keys() {
 
     let key_dir = write_test_key();
 
-    static EXPECTED: &[u8] = &[
-        0x01, 0x01, 0x0F, b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'a', b'b',
-        b'c', b'd', b'e', b'f',
-    ];
+    static EXPECTED: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
@@ -127,7 +124,7 @@ fn read_header_then_request_keys() {
     S.assert_input_sent(EXPECTED);
 
     S.assert_no_calls_remaining();
-    guard.expect_logs(&[]);
+    guard.expect_logs(&["Retrieving key set.", "API key detected at path: test.key"]);
 }
 
 #[test]
@@ -415,7 +412,7 @@ fn read_header_then_in_same_chunk_request_keys_then_request_metrics() {
 
     let key_dir = write_test_key();
 
-    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x0F0123456789abcdef";
+    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
         b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
@@ -482,7 +479,7 @@ journald_messages_ingested_bytes_total 0
     S.assert_input_sent(&expected_sent);
 
     S.assert_no_calls_remaining();
-    guard.expect_logs(&[]);
+    guard.expect_logs(&["Retrieving key set.", "API key detected at path: test.key"]);
 }
 
 #[test]
@@ -493,7 +490,7 @@ fn read_header_then_in_same_chunk_keys_then_track_then_metrics_then_track() {
 
     let key_dir = write_test_key();
 
-    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x0F0123456789abcdef";
+    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
         b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
@@ -565,7 +562,7 @@ journald_messages_ingested_bytes_total 0
     S.assert_input_sent(&expected_sent);
 
     S.assert_no_calls_remaining();
-    guard.expect_logs(&[]);
+    guard.expect_logs(&["Retrieving key set.", "API key detected at path: test.key"]);
 }
 
 #[test]
@@ -576,7 +573,7 @@ fn read_header_then_in_same_chunk_request_metrics_then_request_keys() {
 
     let key_dir = write_test_key();
 
-    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x0F0123456789abcdef";
+    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
         b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
@@ -643,7 +640,7 @@ journald_messages_ingested_bytes_total 0
     S.assert_input_sent(&expected_sent);
 
     S.assert_no_calls_remaining();
-    guard.expect_logs(&[]);
+    guard.expect_logs(&["Retrieving key set.", "API key detected at path: test.key"]);
 }
 
 #[test]
@@ -654,7 +651,7 @@ fn read_header_then_request_keys_then_request_metrics() {
 
     let key_dir = write_test_key();
 
-    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x0F0123456789abcdef";
+    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
         b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
@@ -722,7 +719,7 @@ journald_messages_ingested_bytes_total 0
     S.assert_input_sent(&expected_sent);
 
     S.assert_no_calls_remaining();
-    guard.expect_logs(&[]);
+    guard.expect_logs(&["Retrieving key set.", "API key detected at path: test.key"]);
 }
 
 #[test]
@@ -733,7 +730,7 @@ fn read_header_then_request_metrics_then_request_keys() {
 
     let key_dir = write_test_key();
 
-    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x0F0123456789abcdef";
+    static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
         b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
@@ -801,7 +798,7 @@ journald_messages_ingested_bytes_total 0
     S.assert_input_sent(&expected_sent);
 
     S.assert_no_calls_remaining();
-    guard.expect_logs(&[]);
+    guard.expect_logs(&["Retrieving key set.", "API key detected at path: test.key"]);
 }
 
 #[test]

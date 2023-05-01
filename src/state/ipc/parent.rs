@@ -18,7 +18,7 @@ pub fn finish_response_metrics(buf: &mut [u8]) {
 }
 
 pub fn receive_key_set_bytes(key_set: KeySet) -> Box<[u8]> {
-    let key_set = key_set.into_insecure_view_keys();
+    let key_set = key_set.insecure_view_keys();
     debug_assert!(key_set.len() <= zero_extend_u8_usize(u8::MAX));
     let mut buf = Vec::new();
     buf.extend_from_slice(&[0x01, truncate_usize_u8(key_set.len())]);
@@ -26,14 +26,14 @@ pub fn receive_key_set_bytes(key_set: KeySet) -> Box<[u8]> {
     for key in key_set.iter() {
         let key_value = key.insecure_get_value();
         debug_assert!(key_value.len() <= zero_extend_u8_usize(u8::MAX));
-        // It's okay to wrap - it can't be zero.
-        buf.push(truncate_usize_u8(key_value.len().wrapping_sub(1)));
+        buf.push(truncate_usize_u8(key_value.len()));
         buf.extend_from_slice(key.insecure_get_value());
     }
 
     buf.into()
 }
 
+#[derive(Debug)]
 enum DecoderState {
     Locked,
     Version,
@@ -78,10 +78,9 @@ impl fmt::Debug for DecoderResponse {
 pub struct Decoder {
     state: DecoderState,
     read_phase: ReadPhase,
-    key_set_response: Option<SliceAccumulator<Key>>,
-    metrics_response: Option<SliceAccumulator<u8>>,
-    byte_acc: Option<SliceAccumulator<u8>>,
-    key_acc: Option<SliceAccumulator<Key>>,
+    response: DecoderResponse,
+    byte_acc: Option<ByteAccumulator>,
+    key_acc: Option<KeyAccumulator>,
 }
 
 impl Decoder {
@@ -89,30 +88,23 @@ impl Decoder {
         Self {
             state: DecoderState::Version,
             read_phase: ReadPhase::new(),
-            key_set_response: None,
-            metrics_response: None,
+            response: DecoderResponse {
+                key_set: ResponseItem::None,
+                metrics: ResponseItem::None,
+            },
             byte_acc: None,
             key_acc: None,
         }
     }
 
     pub fn take_response(&mut self) -> DecoderResponse {
-        DecoderResponse {
-            key_set: match self.key_set_response.take() {
-                None => ResponseItem::None,
-                Some(response) => match response.finish() {
-                    None => ResponseItem::AllocationFailed,
-                    Some(key_set) => ResponseItem::Some(KeySet::new(key_set)),
-                },
+        replace(
+            &mut self.response,
+            DecoderResponse {
+                key_set: ResponseItem::None,
+                metrics: ResponseItem::None,
             },
-            metrics: match self.metrics_response.take() {
-                None => ResponseItem::None,
-                Some(response) => match response.finish() {
-                    None => ResponseItem::AllocationFailed,
-                    Some(metrics_data) => ResponseItem::Some(metrics_data),
-                },
-            },
-        }
+        )
     }
 
     pub fn read_bytes(&mut self, buf: &[u8]) {
@@ -139,7 +131,7 @@ impl Decoder {
                 DecoderState::ResponseMetrics => match iter.phase_next_32(&mut self.read_phase) {
                     None => break DecoderState::ResponseMetrics,
                     Some(len) => {
-                        self.byte_acc = Some(SliceAccumulator::new(len));
+                        self.byte_acc = Some(ByteAccumulator::new(len));
                         state = DecoderState::ResponseMetricsExpectBody;
                     }
                 },
@@ -152,7 +144,13 @@ impl Decoder {
                             break state;
                         }
                     } else {
-                        self.metrics_response = self.byte_acc.take();
+                        self.response.metrics = match self.byte_acc.take() {
+                            None => ResponseItem::None,
+                            Some(response) => match response.finish() {
+                                None => ResponseItem::AllocationFailed,
+                                Some(metrics_data) => ResponseItem::Some(metrics_data),
+                            },
+                        };
                         state = DecoderState::Start;
                     }
                 }
@@ -160,7 +158,7 @@ impl Decoder {
                 DecoderState::ReceiveKeySet => match iter.next() {
                     None => break DecoderState::ReceiveKeySet,
                     Some(len) => {
-                        self.key_acc = Some(SliceAccumulator::new(zero_extend_u8_u32(len)));
+                        self.key_acc = Some(KeyAccumulator::new(zero_extend_u8_u32(len)));
                         state = DecoderState::ReceiveKeySetExpectEntry;
                     }
                 },
@@ -171,14 +169,21 @@ impl Decoder {
                         match iter.next() {
                             None => break DecoderState::ReceiveKeySetExpectEntry,
                             Some(len) => {
-                                self.byte_acc = Some(SliceAccumulator::new(
-                                    zero_extend_u8_u32(len).wrapping_add(1),
-                                ));
+                                if len > truncate_usize_u8(MAX_KEY_LEN) {
+                                    std::panic::panic_any("Key entry too long.");
+                                }
+                                self.byte_acc = Some(ByteAccumulator::new(zero_extend_u8_u32(len)));
                                 state = DecoderState::ReceiveKeySetExpectKey;
                             }
                         }
                     } else {
-                        self.key_set_response = self.key_acc.take();
+                        self.response.key_set = match self.key_acc.take() {
+                            None => ResponseItem::None,
+                            Some(response) => match response.finish() {
+                                None => ResponseItem::AllocationFailed,
+                                Some(key_set) => ResponseItem::Some(key_set),
+                            },
+                        };
                         state = DecoderState::Start;
                     }
                 }
@@ -194,7 +199,7 @@ impl Decoder {
                         self.key_acc
                             .as_mut()
                             .unwrap()
-                            .push(Key::from_raw(byte_acc.initialized()));
+                            .push_raw(byte_acc.initialized());
                         state = DecoderState::ReceiveKeySetExpectEntry;
                     }
                 }
