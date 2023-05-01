@@ -143,15 +143,9 @@ impl KeySet {
         let mut match_found = false;
 
         for trusted_key in key_set.iter() {
-            let mut current_matched = true;
-
-            for i in 0..MAX_KEY_LEN {
-                let left = input_key.raw[i];
-                let right = trusted_key.raw[i];
-                current_matched = std::hint::black_box(current_matched & (left == right));
-            }
-
-            match_found = std::hint::black_box(match_found | current_matched);
+            match_found = std::hint::black_box(
+                match_found | openssl::memcmp::eq(&input_key.raw, &trusted_key.raw),
+            );
         }
 
         std::hint::black_box(match_found)

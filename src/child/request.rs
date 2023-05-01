@@ -4,8 +4,6 @@ use super::ipc::request_metrics;
 use super::ipc::IPCRequester;
 use super::limiter::Limiter;
 use crate::ffi::ImmutableWrite;
-use base64::engine::general_purpose::STANDARD_NO_PAD as ENGINE;
-use base64::engine::Engine as _;
 use std::net::SocketAddr;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -120,19 +118,20 @@ fn handle_metrics_get<C: RequestContext + 'static>(
         return None;
     };
 
-    let rest = trim_auth_token(rest);
-
-    // 0 = empty
-    // 1 = invalid Base64
-    if rest.len() <= 1 {
-        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
-        return None;
-    }
-
-    let Ok(decoded) = ENGINE.decode(rest) else {
+    let Ok(rest) = std::str::from_utf8(rest) else {
         ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
         return None;
     };
+
+    let Ok(decoded) = openssl::base64::decode_block(rest) else {
+        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+        return None;
+    };
+
+    if decoded.is_empty() {
+        ctx.respond(&RESPONSE_BAD_AUTH_SYNTAX, &[]);
+        return None;
+    }
 
     let Some(password) = decoded.strip_prefix(b"metrics:") else {
         // Require a username, but treat passwords as optional for the purpose of authentication.
