@@ -15,7 +15,6 @@ tiny_http = { version = "0.12.0", features = ["ssl-openssl"] }
 zeroize = "1.5.7"
 const-str = { version = "0.5.4", features = ["std"] }
 heapless = "0.7.16"
-human-panic = "1.1.4"
 impls = "1.0.3"
 # Match `tiny_http`
 openssl = "0.10"
