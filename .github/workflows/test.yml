@@ -46,7 +46,7 @@ jobs:
       - name: Show GLIBC version
         run: ldd --version
       - run: yum makecache
-      - run: yum -y install systemd-devel epel-release openssl-devel
+      - run: yum -y install systemd-devel epel-release
       - run: yum -y install jq
       - uses: actions/checkout@v3
       - name: Install Rustup (if needed)
