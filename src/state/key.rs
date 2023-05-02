@@ -112,7 +112,7 @@ impl KeySetBuilder {
             *dest = normalize_hex(*byte);
             dest = dest.add(1);
         }
-        for _ in key.len()..=MAX_KEY_LEN {
+        for _ in key.len()..MAX_KEY_LEN {
             *dest = 0;
             dest = dest.add(1);
         }
