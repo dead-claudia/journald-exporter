@@ -161,5 +161,5 @@ jobs:
         with:
           name: journald-exporter
       - run: chmod +x journald-exporter
-      - run: sudo ./scripts/e2e-setup.sh
-      - run: sudo ./scripts/e2e.sh -b journald-exporter -t ${{ matrix.type }}
+      - run: sudo ./scripts/e2e-setup.sh 2>&1
+      - run: sudo ./scripts/e2e.sh -b journald-exporter -t ${{ matrix.type }} 2>&1
