@@ -23,7 +23,7 @@ while getopts ':p:d:b:t:' opt; do
             (( port >= 1 && port <= 65535 )) || bail 'Port must be within 1 and 65535 inclusive.'
             ;;
         d)
-            [[ "$OPTARG" =~ ^[[:digit:]]+$ ]] || bail 'Port must be an integer if provided.'
+            [[ "$OPTARG" =~ ^[[:digit:]]+$ ]] || bail 'Test duration must be an integer if provided.'
             (( test_duration = OPTARG ))
             (( test_duration >= 1 && test_duration % 1 == 0 )) || bail 'Test duration must be a positive number of seconds.'
             ;;
