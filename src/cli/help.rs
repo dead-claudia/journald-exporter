@@ -25,13 +25,13 @@ Arguments:
 -k KEY_DIRECTORY, --key-dir KEY_DIRECTORY
     The directory with accepted API keys.
 
--c CERTIFICATE_FILE, --certificate CERTIFICATE_FILE
+-C CERTIFICATE_FILE, --certificate CERTIFICATE_FILE
     The PEM-encoded file with the list of public certificates to use for
-    HTTPS. Must be used in conjunction with `-P`/`--private-key`.
+    HTTPS. Must be used in conjunction with `-K`/`--private-key`.
 
--P PRIVATE_KEY_FILE, --private-key PRIVATE_KEY_FILE
+-K PRIVATE_KEY_FILE, --private-key PRIVATE_KEY_FILE
     The PEM-encoded file with the private key to use for HTTPS. Must be used
-    in conjunction with `-c`/`--certificate`.
+    in conjunction with `-C`/`--certificate`.
 
 Notes:
 
