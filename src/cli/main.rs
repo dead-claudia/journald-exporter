@@ -24,7 +24,7 @@ pub fn main() {
     request_signal_when_parent_terminates(Signal::SIGTERM);
 
     // Wire up the logger that's used everywhere to just print everything to stdout/stderr.
-    log::set_max_level(log::LevelFilter::Trace);
+    log::set_max_level(log::LevelFilter::Info);
     // SAFETY: Obviously no threads have been spawned yet, so it's fine to not go through all the
     // ceremony of thread safety.
     if unsafe { log::set_logger_racy(&StderrLogger) }.is_err() {
