@@ -85,6 +85,8 @@ echo "user = metrics:$(cat "$API_KEY_DIR/test.key")" > $CURL_CONFIG
 extra_args=()
 [[ $type == https ]] && extra_args=(--certificate "$TLS_PUBLIC_CERT" --private-key "$TLS_PRIVATE_KEY")
 
+echo '[INTEG] Starting integration tests...'
+
 mapfile -t start_lines < <(
     systemd-run \
     --collect \
@@ -119,7 +121,7 @@ if [[ "$action_type" == fetch ]]; then
     echo "[INTEG] Starting fetch loop" >&2
 
     current_time=$(date +%s)
-    (( fetch_stop_time = current_time + test_duration ))
+    (( fetch_stop_time = current_time + test_duration )) || true
 
     while (( current_time < fetch_stop_time )); do
         start_time=$(date +%s)
@@ -156,7 +158,7 @@ if [[ "$action_type" == fetch ]]; then
 
         # Now, sleep to the next request time.
         end_time=$(date +%s)
-        (( sleep_interval = TEST_INTERVAL - ( end_time - start_time ) ))
+        (( sleep_interval = TEST_INTERVAL - ( end_time - start_time ) )) || true
         sleep $(( sleep_interval < 0 ? 0 : sleep_interval ))
         current_time=$(date +%s)
     done
