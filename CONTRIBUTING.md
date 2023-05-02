@@ -16,13 +16,45 @@ You can find instructions on how to install that [here](https://www.rust-lang.or
 
 ## E2E testing
 
-First, before you run the E2E tests, run `./scripts/e2e-setup.sh`. This will set up all the stuff needed, including:
+In order to run the E2E tests, you'll need three things installed: systemd, curl, and Bash. (Chances are, you have all three installed.)
+
+First, before you run the E2E tests, run this command:
+
+```sh
+sudo ./scripts/e2e-setup.sh
+```
+
+It will set up all the stuff needed, including:
 
 - The certificate and private key needed for testing HTTPS
 - A `journald-exporter` system account, without a home directory
 - A test API key
 
-The tests are all written in a decently-sized Bash script you can run via `./scripts/e2e.sh`. It's assumed you have, in addition to the obvious systemd, curl and OpenSSL installed as well as a non-ancient Bash.
+If you want to refresh it (ex: `/tmp` gets cleared), just re-run the script.
+
+To run the tests, first build the binary:
+
+```sh
+# You *can* do a debug build, but it's better to test against the release build.
+cargo build --release
+```
+
+Then, run one of the following:
+
+```sh
+# Test the plaintext HTTP endpoint (either one works)
+sudo ./scripts/e2e.sh
+sudo ./scripts/e2e.sh -t http
+
+# Test the encrypted HTTPS endpoint
+sudo ./scripts/e2e.sh -t https
+```
+
+There's a few other options you can pass along, too:
+
+- `-p <PORT>`: Set the port to run at. Default is 8080.
+- `-d <DURATION>`: Set the test duration to run in seconds. Default is 60. Note that anything below about 10 is pointless, since the API is invoked once every 5 seconds.
+- `-b <BINARY_PATH>`: Set the path to the binary. CI is set up to use this to simplify its workflow.
 
 ## Process isolation
 
@@ -48,7 +80,7 @@ The parent and child can communicate in a limited fashion via an IPC channel. Th
 
 ## Child server
 
-The child server is laid out as a sort-of event driven server. The request flow works like this:
+The child server is laid out as a sort-of event driven server. The request flow at a high level works like this:
 
 1. Request comes in, is queued for handling. The listener then loops back and waits for another request.
 2. The request is removed from the queue, validated, and handled. If it's a metrics request with authorization, it's added to a list of requests pending metrics. If it's anything else, a response is just generated right then and there.
@@ -76,7 +108,7 @@ There's two main reasons you'll need to disable tests:
 There are ways to mitigate both of those:
 
 - If it's not "just" a simple FFI wrapper, you can likely shim it.
-- Instead of using libc helpers, one can just implement the algorithm in Rust. This is done for the journal cursors' equality and (internal) length operations instead of using `strcmp` and `strlen` from libc.
+- Instead of using libc helpers, one can just implement the algorithm in Rust. This isn't common for FFI-related code, but built-in Rust methods are typically used in place of libc methods.
 - Constants and static variables can be used to hack out a *lot* of potential slowness, at only a modest increase in compile time. They are heavily limited, but strategic use of arrays can go a long way.
 - If you're doing a lot of `Vec` work and it's turned out to be really slow in Miri, consider using `Vec::with_capacity`. The resizing operation is pretty slow, and if you're doing it in a loop, you'll probably save a lot of time.
 
