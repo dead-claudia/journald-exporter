@@ -16,7 +16,7 @@ You can find instructions on how to install that [here](https://www.rust-lang.or
 
 ## E2E testing
 
-In order to run the E2E tests, you'll need three things installed: systemd, curl, and Bash. (Chances are, you have all three installed.)
+In order to run the E2E tests, you'll need three things installed: systemd, Node, and Bash. (Chances are, you have systemd and Bash installed, but you may need to install Node.)
 
 First, before you run the E2E tests, run this command:
 
@@ -43,11 +43,11 @@ Then, run one of the following:
 
 ```sh
 # Test the plaintext HTTP endpoint (either one works)
-sudo ./scripts/e2e.sh
-sudo ./scripts/e2e.sh -t http
+sudo node ./scripts/e2e.js
+sudo node ./scripts/e2e.js -t http
 
 # Test the encrypted HTTPS endpoint
-sudo ./scripts/e2e.sh -t https
+sudo node ./scripts/e2e.js -t https
 ```
 
 There's a few other options you can pass along, too:
@@ -55,6 +55,13 @@ There's a few other options you can pass along, too:
 - `-p <PORT>`: Set the port to run at. Default is 8080.
 - `-d <DURATION>`: Set the test duration to run in seconds. Default is 60. Note that anything below about 10 is pointless, since the API is invoked once every 5 seconds.
 - `-b <BINARY_PATH>`: Set the path to the binary. CI is set up to use this to simplify its workflow.
+
+> Why Node and not a Bash script? Few reasons:
+>
+> 1. There's a lot less room for error with process management. For one, Node automatically kills and waits on child processes, avoiding a pain point with the Bash script that led to debuggability issues. Also, it avoids weird issues with stdout/stderr not showing up in CI.
+> 2. Node's timers and native HTTP support allow me to only wrangle one child process, not three, and I can fit everything into a single file.
+> 3. All in all, it comes out to a file that's only about 50% larger, yet I can do everything I want at a low level.
+> 4. I'm familiar with Node, and that of course saves a lot of time.
 
 ## Process isolation
 
