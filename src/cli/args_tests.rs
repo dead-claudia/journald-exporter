@@ -762,7 +762,7 @@ fn unsigned_16_bit_port_number_with_file_and_unknown_third_arg_fails_with_unknow
 
 #[test]
 fn certificate_arg_requires_value() {
-    for c in ["-c", "--certificate"] {
+    for c in ["-C", "--certificate"] {
         assert_eq!(
             parse_args(&[
                 "journald-exporter",
@@ -780,7 +780,7 @@ fn certificate_arg_requires_value() {
 
 #[test]
 fn certificate_arg_rejects_empty_value() {
-    for c in ["-c", "--certificate"] {
+    for c in ["-C", "--certificate"] {
         assert_eq!(
             parse_args(&[
                 "journald-exporter",
@@ -799,7 +799,7 @@ fn certificate_arg_rejects_empty_value() {
 
 #[test]
 fn certificate_arg_requires_private_key_arg() {
-    for c in ["-c", "--certificate"] {
+    for c in ["-C", "--certificate"] {
         assert_eq!(
             parse_args(&[
                 "journald-exporter",
@@ -818,7 +818,7 @@ fn certificate_arg_requires_private_key_arg() {
 
 #[test]
 fn private_key_arg_requires_value() {
-    for p in ["-P", "--private-key"] {
+    for p in ["-K", "--private-key"] {
         assert_eq!(
             parse_args(&[
                 "journald-exporter",
@@ -836,7 +836,7 @@ fn private_key_arg_requires_value() {
 
 #[test]
 fn private_key_arg_rejects_empty_value() {
-    for p in ["-P", "--private-key"] {
+    for p in ["-K", "--private-key"] {
         assert_eq!(
             parse_args(&[
                 "journald-exporter",
@@ -855,7 +855,7 @@ fn private_key_arg_rejects_empty_value() {
 
 #[test]
 fn private_key_arg_requires_certificate_arg() {
-    for p in ["-P", "--private-key"] {
+    for p in ["-K", "--private-key"] {
         assert_eq!(
             parse_args(&[
                 "journald-exporter",
@@ -874,8 +874,8 @@ fn private_key_arg_requires_certificate_arg() {
 
 #[test]
 fn certificate_arg_and_private_key_arg_returns_parent() {
-    for c in ["-c", "--certificate"] {
-        for p in ["-P", "--private-key"] {
+    for c in ["-C", "--certificate"] {
+        for p in ["-K", "--private-key"] {
             assert_eq!(
                 parse_args(&[
                     "journald-exporter",

@@ -86,7 +86,7 @@ This is essentially the same whether you're using it in agent mode or server mod
 2. Run the installer.
 
     ```sh
-    curl https://raw.githubusercontent.com/dead-claudia/journald-exporter/main/install.sh | sudo bash -s -c $cert -p $priv
+    curl https://raw.githubusercontent.com/dead-claudia/journald-exporter/main/install.sh | sudo bash -s -C $cert -K $priv
     ```
 
 3. Poke a hole in your firewall for port 12345 to allow inbound connections from it.
@@ -153,7 +153,7 @@ It'll depend on what you're using.
 2. Run the installer.
 
     ```sh
-    curl https://raw.githubusercontent.com/dead-claudia/journald-exporter/main/install.sh | sudo bash
+    curl https://raw.githubusercontent.com/dead-claudia/journald-exporter/main/install.sh | sudo bash -s -C $cert -K $priv
     ```
 
     If your scraper is local, pass `-g SCRAPER_GROUP` if you can to set the owning key to the right group right off the bat. It'll save you a `chgrp SCRAPER_GROUP /etc/prometheus-keys/journald-exporter.key` command and some time.

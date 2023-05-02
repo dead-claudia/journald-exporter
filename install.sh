@@ -18,13 +18,13 @@ Arguments:
     specified multiple times, but only the first is exposed to any specified
     group.
 
--c CERTIFICATE
+-C CERTIFICATE
     The path where the provisioned certificate exists. Must be specified in
-    tandem with '-p PRIVATE_KEY'.
+    tandem with '-K PRIVATE_KEY'.
 
--p PRIVATE_KEY
+-K PRIVATE_KEY
     The path where the certificate's private key is. Must be specified in
-    tandem with '-c CERTIFICATE'.
+    tandem with '-C CERTIFICATE'.
 
 Copyright 2023 Claudia Meadows
 
@@ -50,7 +50,7 @@ main() {
     local private_key=
     local -a key_files=()
 
-    while getopts ':p:k:g:c:h' arg; do
+    while getopts ':K:k:g:C:h' arg; do
         case "$arg" in
             g)
                 # Align with Debian and Ubuntu, but with a size limit of 31 characters
@@ -62,11 +62,11 @@ main() {
                 [[ -f "$OPTARG" ]] || fail 'Key file must exist'
                 key_files+=("$OPTARG")
                 ;;
-            c)
+            C)
                 [[ -f "$OPTARG" ]] || fail 'Certificate file must exist'
                 certificate="$OPTARG"
                 ;;
-            p)
+            K)
                 [[ -f "$OPTARG" ]] || fail 'Private key file must exist'
                 private_key="$OPTARG"
                 ;;
