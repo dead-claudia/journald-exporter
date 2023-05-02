@@ -125,9 +125,22 @@ jobs:
     name: Miri tests
     needs:
       - unit_tests
+    # Parallelize it to avoid the final step timing out.
+    strategy:
+      matrix:
+        module:
+        # Mirrors each top-level directory in `src`.
+        - child
+        - cli
+        - common
+        - ffi
+        - parent
+        - state
+        - test_utils
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get update
+      # Only needed for linking. It won't actually be used.
       - run: sudo apt-get install libsystemd-dev
       - uses: actions/checkout@v3
       - name: Install Rustup (if needed)
@@ -139,7 +152,7 @@ jobs:
       - run: rustup toolchain install nightly --profile minimal --component miri
       - run: rustup override set nightly
       - run: cargo +nightly miri setup
-      - run: cargo +nightly miri test --all-targets -- --show-output
+      - run: cargo +nightly miri test --all-targets ${{ matrix.module }} -- --show-output
 
   e2e_tests:
     name: End-to-end tests (release)
