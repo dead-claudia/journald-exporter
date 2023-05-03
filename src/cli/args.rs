@@ -79,58 +79,88 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
 
     let mut state = ArgState::Initial;
 
-    let mut parent_port = None::<NonZeroU16>;
+    let mut port = None::<NonZeroU16>;
     let mut key_dir = None::<PathBuf>;
     let mut certificate = None::<PathBuf>;
     let mut private_key = None::<PathBuf>;
 
+    fn parse_port(arg: &[u8]) -> Result<NonZeroU16, ArgsError> {
+        parse_u32(arg)
+            .and_then(|v| u16::try_from(v).ok())
+            .and_then(NonZeroU16::new)
+            .ok_or(ArgsError::InvalidPort)
+    }
+
+    fn parse_path(arg: &[u8], error: ArgsError) -> Result<PathBuf, ArgsError> {
+        if arg.is_empty() {
+            Err(error)
+        } else {
+            Ok(PathBuf::from(std::ffi::OsStr::from_bytes(arg)))
+        }
+    }
+
     // Skip the first argument - it's the executable.
     for arg in args.into_iter().skip(1) {
         match state {
-            ArgState::Initial => match arg.to_str() {
-                Some("-help" | "--help" | "-h" | "-?") => return Err(ArgsError::ShowHelp),
-                Some("-version" | "--version" | "-v" | "-V") => return Err(ArgsError::ShowVersion),
-                Some("-p" | "--port") => state = ArgState::ExpectParentPort,
-                Some("-k" | "--key-dir") => state = ArgState::ExpectKeyDir,
-                Some("-C" | "--certificate") => state = ArgState::ExpectCertificate,
-                Some("-K" | "--private-key") => state = ArgState::ExpectPrivateKey,
-                Some("--child-process") => return Ok(Args::Child),
+            ArgState::Initial => match arg.as_bytes() {
+                b"-help" | b"--help" | b"-h" | b"-?" => return Err(ArgsError::ShowHelp),
+                b"-version" | b"--version" | b"-v" | b"-V" => return Err(ArgsError::ShowVersion),
+                b"-p" | b"--port" => state = ArgState::ExpectParentPort,
+                b"-k" | b"--key-dir" => state = ArgState::ExpectKeyDir,
+                b"-C" | b"--certificate" => state = ArgState::ExpectCertificate,
+                b"-K" | b"--private-key" => state = ArgState::ExpectPrivateKey,
+                b"--child-process" => return Ok(Args::Child),
+
+                // Short option equals
+                [b'-', b'p', b'=', arg @ ..] => {
+                    port = Some(parse_port(arg)?);
+                }
+                [b'-', b'k', b'=', arg @ ..] => {
+                    key_dir = Some(parse_path(arg, ArgsError::EmptyKeyDir)?);
+                }
+                [b'-', b'C', b'=', arg @ ..] => {
+                    certificate = Some(parse_path(arg, ArgsError::EmptyCertificate)?);
+                }
+                [b'-', b'K', b'=', arg @ ..] => {
+                    private_key = Some(parse_path(arg, ArgsError::EmptyPrivateKey)?);
+                }
+
+                // `--port=`
+                [b'-', b'-', b'p', b'o', b'r', b't', b'=', arg @ ..] => {
+                    port = Some(parse_port(arg)?);
+                }
+                // `--key-dir=`
+                [b'-', b'-', b'k', b'e', b'y', b'-', b'd', b'i', b'r', b'=', arg @ ..] => {
+                    key_dir = Some(parse_path(arg, ArgsError::EmptyKeyDir)?);
+                }
+                // `--certificate=`
+                [b'-', b'-', b'c', b'e', b'r', b't', b'i', b'f', b'i', b'c', b'a', b't', b'e', b'=', arg @ ..] =>
+                {
+                    certificate = Some(parse_path(arg, ArgsError::EmptyCertificate)?);
+                }
+                // `--private-key=`
+                [b'-', b'-', b'p', b'r', b'i', b'v', b'a', b't', b'e', b'-', b'k', b'e', b'y', b'=', arg @ ..] =>
+                {
+                    private_key = Some(parse_path(arg, ArgsError::EmptyPrivateKey)?);
+                }
+
                 _ => return Err(ArgsError::UnknownFlag(arg)),
             },
-            ArgState::ExpectParentPort => match arg.to_str() {
-                None => return Err(ArgsError::InvalidPort),
-                // Parse it as a port number
-                Some(value) => match value.parse() {
-                    Err(_) => return Err(ArgsError::InvalidPort),
-                    Ok(port) => {
-                        parent_port = Some(port);
-                        state = ArgState::Initial;
-                    }
-                },
-            },
-            ArgState::ExpectKeyDir => {
-                if arg.is_empty() {
-                    return Err(ArgsError::EmptyKeyDir);
-                }
-
-                key_dir = Some(PathBuf::from(arg));
+            ArgState::ExpectParentPort => {
                 state = ArgState::Initial;
+                port = Some(parse_port(arg.as_bytes())?);
+            }
+            ArgState::ExpectKeyDir => {
+                state = ArgState::Initial;
+                key_dir = Some(parse_path(arg.as_bytes(), ArgsError::EmptyKeyDir)?);
             }
             ArgState::ExpectCertificate => {
-                if arg.is_empty() {
-                    return Err(ArgsError::EmptyCertificate);
-                }
-
-                certificate = Some(PathBuf::from(arg));
                 state = ArgState::Initial;
+                certificate = Some(parse_path(arg.as_bytes(), ArgsError::EmptyCertificate)?);
             }
             ArgState::ExpectPrivateKey => {
-                if arg.is_empty() {
-                    return Err(ArgsError::EmptyPrivateKey);
-                }
-
-                private_key = Some(PathBuf::from(arg));
                 state = ArgState::Initial;
+                private_key = Some(parse_path(arg.as_bytes(), ArgsError::EmptyPrivateKey)?);
             }
         }
     }
@@ -147,7 +177,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 }),
             };
 
-            match (parent_port, key_dir) {
+            match (port, key_dir) {
                 // Show help if no arguments are given.
                 (None, None) => Err(ArgsError::ShowHelp),
                 (None, Some(_)) => Err(ArgsError::MissingPort),
