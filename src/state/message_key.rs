@@ -55,8 +55,8 @@ impl Arbitrary for ByteCountTableKey {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(test, derive(Clone, Copy))]
+#[derive(PartialEq, Clone, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(Copy))]
 pub struct MessageKey {
     pub priority: Priority,
     pub table_key: ByteCountTableKey,

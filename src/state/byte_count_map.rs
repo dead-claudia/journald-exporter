@@ -2,6 +2,7 @@ use crate::prelude::*;
 
 use super::ByteCountTableKey;
 use super::MessageKey;
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(Clone, Copy))]
@@ -92,96 +93,61 @@ impl ByteCountSnapshot {
 
 // `repr(C)` to ensure the order's well-defined.
 #[repr(C)]
-struct ByteCountTableEntry {
+struct ByteCountData {
     lines: Counter,
     bytes: Counter,
-    key: ByteCountTableKey,
 }
 
 pub struct ByteCountMap {
-    // The last entry of "priority" 8 is the fallback.
-    priority_table: [RwLock<Vec<ByteCountTableEntry>>; 8],
+    table: RwLock<Option<HashMap<MessageKey, ByteCountData>>>,
+}
+
+fn find_and_increment(
+    entries: &Option<HashMap<MessageKey, ByteCountData>>,
+    key: &MessageKey,
+    msg_len: usize,
+) -> bool {
+    match entries.as_ref().and_then(|e| e.get(key)) {
+        None => false,
+        Some(entry) => {
+            entry.lines.increment();
+            entry.bytes.increment_by(zero_extend_usize_u64(msg_len));
+            true
+        }
+    }
 }
 
 impl ByteCountMap {
     pub const fn new() -> ByteCountMap {
         ByteCountMap {
-            priority_table: [
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-                RwLock::new(Vec::new()),
-            ],
+            table: RwLock::new(None),
         }
     }
 
     pub fn snapshot(&self) -> Option<ByteCountSnapshot> {
-        // Empty boxes are cheap - they don't actually allocate.
-        let mut priority_table: [Box<[ByteCountTableEntrySnapshot]>; 8] = [
-            Box::new([]),
-            Box::new([]),
-            Box::new([]),
-            Box::new([]),
-            Box::new([]),
-            Box::new([]),
-            Box::new([]),
-            Box::new([]),
+        let mut priority_table: [Vec<ByteCountTableEntrySnapshot>; 8] = [
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
         ];
 
-        for (snapshot, table) in priority_table.iter_mut().zip(&self.priority_table) {
-            let table_lock = table.read().unwrap_or_else(|e| e.into_inner());
-
-            // The idea is this:
-            // 1. Bulk copy the whole thing. This is a simple `alloc` + `memcpy` - it's cheap.
-            // 2. Copy the atomic loads. Will be a relatively tight loop, but less cache-friendly.
-            // 3. Since it's now initialized, reinterpret it as needed. (This part requires almost
-            //    no compute, and also doesn't need the guard.)
-
-            // SAFETY: It's okay to copy the whole thing at first - the atomics can be garbage at
-            // first. The atomics will be initialized after with proper atomic instructions.
-            unsafe {
-                use std::alloc::*;
-
-                let len = table_lock.len();
-                // If the length is zero, an empty box is desired. (Also, it'll cause memory bugs
-                // if I don't special-case this.)
-                if len == 0 {
-                    continue;
-                }
-
-                let ptr = table_lock.as_ptr();
-
-                let layout = match Layout::array::<ByteCountTableEntrySnapshot>(len) {
-                    Ok(layout) => layout,
-                    Err(_) => return None,
-                };
-
-                let byte_ptr = alloc(layout);
-                if byte_ptr.is_null() {
-                    return None;
-                }
-
-                std::ptr::copy_nonoverlapping(ptr.cast(), byte_ptr, layout.size());
-
-                let result_ptr: *mut ByteCountTableEntrySnapshot = byte_ptr.cast();
-
-                for (i, entry) in table_lock.iter().enumerate() {
-                    let bytes = entry.bytes.current();
-                    let lines = entry.lines.current();
-                    let target = result_ptr.add(i);
-                    std::ptr::write(std::ptr::addr_of_mut!((*target).bytes), bytes);
-                    std::ptr::write(std::ptr::addr_of_mut!((*target).lines), lines);
-                }
-
-                let result = Box::from_raw(std::ptr::slice_from_raw_parts_mut(result_ptr, len));
-
-                drop(table_lock);
-
-                *snapshot = result;
+        if let Some(table) = &*self.table.read().unwrap_or_else(|e| e.into_inner()) {
+            for (key, value) in table {
+                // It's not copyable in production, as it's supposed to be minimally copied in
+                // general (in no small part due to its size).
+                #[allow(clippy::clone_on_copy)]
+                priority_table[zero_extend_u8_usize(key.priority.as_severity_index())].push(
+                    ByteCountTableEntrySnapshot {
+                        lines: value.lines.current(),
+                        bytes: value.bytes.current(),
+                        key: key.table_key.clone(),
+                    },
+                );
             }
         }
 
@@ -190,7 +156,9 @@ impl ByteCountMap {
             snapshot.sort_by(|a, b| a.key.cmp(&b.key));
         }
 
-        Some(ByteCountSnapshot { priority_table })
+        Some(ByteCountSnapshot {
+            priority_table: priority_table.map(Into::into),
+        })
     }
 
     // Take a reference to avoid a copy.
@@ -201,10 +169,7 @@ impl ByteCountMap {
         // the indirection on priority/severity level.
         //
         // Using an upgradable lock so I don't need to drop and re-acquire it.
-        let priority_index = zero_extend_u8_usize(key.priority.as_severity_index());
-        let read_lock = self.priority_table[priority_index]
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let read_lock = self.table.read().unwrap_or_else(|e| e.into_inner());
 
         if find_and_increment(&read_lock, key, msg_len) {
             return true;
@@ -212,73 +177,54 @@ impl ByteCountMap {
 
         // Don't deadlock. Drop the lock before entering the fallback path.
         drop(read_lock);
+        self.push_line_likely_new(key, msg_len)
+    }
 
-        return push_line_likely_new(&self.priority_table[priority_index], key, msg_len);
+    // Here's why I want to keep this fully out of the hot path:
+    // - There's normally only like a few hundred services active. *Maybe* a thousand on machines
+    //   with a somewhat extreme number of services.
+    // - There are only a few extra dimensions in `MessageKey`: UID, GID, and priority. UIDs and
+    //   GIDs normally align one-to-one with service names, and only a few priorities are normally
+    //   used by each service. Worst case scenario, all 8 are used, but even that doesn't increase
+    //   cardinality much. If you multiply it all together, you're seeing up to at most a few
+    //   thousand keys added during the lifetime of the application, with most of these just being
+    //   added near the exporter's startup.
+    // - The key itself could be relatively large (like 250+ bytes), and it's just wasteful to
+    //   allocate that much stack space on an infrequent call path.
+    #[cold]
+    #[inline(never)]
+    fn push_line_likely_new(&self, key: &MessageKey, msg_len: usize) -> bool {
+        // Entry doesn't exist. Time to acquire a write lock and update the hash map with a
+        // possible new key.
+        let mut write_lock = self.table.write().unwrap_or_else(|e| e.into_inner());
 
-        fn find_and_increment(
-            entries: &[ByteCountTableEntry],
-            key: &MessageKey,
-            msg_len: usize,
-        ) -> bool {
-            match entries.iter().find(|entry| entry.key == key.table_key) {
-                None => false,
-                Some(entry) => {
-                    entry.lines.increment();
-                    entry.bytes.increment_by(zero_extend_usize_u64(msg_len));
-                    true
-                }
-            }
-        }
+        if !find_and_increment(&write_lock, key, msg_len) {
+            // While this may reallocate a lot at first, it's unlikely to reallocate too much
+            // after that, since there's only so many system services. This is why it doesn't
+            // try to pre-allocate - it's just not needed.
 
-        // Here's why I want to keep this fully out of the hot path:
-        // - There's normally only like a few hundred services active. *Maybe* a thousand on machines
-        //   with a somewhat extreme number of services.
-        // - There are only a few extra dimensions in `MessageKey`: UID, GID, and priority. UIDs and
-        //   GIDs normally align one-to-one with service names, and only a few priorities are normally
-        //   used by each service. Worst case scenario, all 8 are used, but even that doesn't increase
-        //   cardinality much. If you multiply it all together, you're seeing up to at most a few
-        //   thousand keys added during the lifetime of the application, with most of these just being
-        //   added near the exporter's startup.
-        // - The key itself could be relatively large (like 250+ bytes), and it's just wasteful to
-        //   allocate that much stack space on an infrequent call path.
-        #[cold]
-        #[inline(never)]
-        fn push_line_likely_new(
-            priority_entry: &RwLock<Vec<ByteCountTableEntry>>,
-            key: &MessageKey,
-            msg_len: usize,
-        ) -> bool {
-            // Entry doesn't exist. Time to acquire a write lock and update the hash map with a
-            // possible new key.
-            let mut write_lock = priority_entry.write().unwrap_or_else(|e| e.into_inner());
+            // It's not copyable in production, as it's supposed to be minimally copied in
+            // general (in no small part due to its size).
+            #[allow(clippy::clone_on_copy)]
+            let cloned = key.clone();
 
-            if !find_and_increment(&write_lock, key, msg_len) {
-                // While this may reallocate a lot at first, it's unlikely to reallocate too much
-                // after that, since there's only so many system services. This is why it doesn't
-                // try to pre-allocate - it's just not needed.
+            let entry = ByteCountData {
+                lines: Counter::new(1),
+                bytes: Counter::new(zero_extend_usize_u64(msg_len)),
+            };
 
-                // It's not copyable in production, as it's supposed to be minimally copied in
-                // general (in no small part due to its size).
-                #[allow(clippy::clone_on_copy)]
-                let table_key = key.table_key.clone();
+            let target = write_lock.get_or_insert_with(HashMap::new);
 
-                let entry = ByteCountTableEntry {
-                    lines: Counter::new(1),
-                    bytes: Counter::new(zero_extend_usize_u64(msg_len)),
-                    key: table_key,
-                };
-
-                // Just error. It's not fatal, just results in table state issues.
-                if let Err(e) = write_lock.try_reserve(1) {
-                    log::error!("Failed to push new table entry: {}", e);
-                    return false;
-                }
-
-                write_lock.push(entry);
+            // Just error. It's not fatal, just results in table state issues.
+            if let Err(e) = target.try_reserve(1) {
+                log::error!("Failed to push new table entry: {}", e);
+                return false;
             }
 
-            true
+            target.insert(cloned, entry);
         }
+
+        true
     }
 }
 
