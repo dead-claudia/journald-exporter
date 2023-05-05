@@ -4,12 +4,18 @@
 use crate::prelude::*;
 
 use super::args::Args;
+use super::args::ParentArgs;
+use super::config::parse_config;
+use super::config::ConfigError;
 use crate::child::start_child;
 use crate::cli::args::parse_args;
 use crate::ffi::normalize_errno;
 use crate::ffi::request_signal_when_parent_terminates;
+use crate::ffi::ExitCode;
+use crate::ffi::ExitResult;
 use crate::ffi::Signal;
 use crate::parent::start_parent;
+use std::path::PathBuf;
 
 fn eprintln(msg: Cow<str>) {
     let mut msg = msg.into_owned().into_bytes();
@@ -42,7 +48,9 @@ pub fn main() {
 
     let result = match args {
         Args::Child => start_child(),
-        Args::Parent(args) => start_parent(args),
+        Args::Parent(args) => start_parent_using_flags(args),
+        Args::ParentConfig(config) => start_parent_using_config(config),
+        Args::Check(config) => check_config(config),
     };
 
     match result {
@@ -69,4 +77,46 @@ impl log::Log for StderrLogger {
     fn flush(&self) {
         drop(io::stderr().flush());
     }
+}
+
+fn check_config(config: PathBuf) -> io::Result<ExitResult> {
+    // Just load the config. Errors will be printed out as applicable.
+    load_config(config)?;
+    Ok(ExitResult::Code(ExitCode(0)))
+}
+
+fn load_config(config: PathBuf) -> io::Result<ParentArgs> {
+    let data = std::fs::read(&config)?;
+
+    let e = match parse_config(&data) {
+        Ok(args) => return Ok(args),
+        Err(e) => e,
+    };
+
+    eprintln(format_cow(format_args!(
+        "Errors were encountered while reading {}",
+        config.display()
+    )));
+
+    match e {
+        ConfigError::InvalidUTF8(e) => eprintln(format_cow(format_args!("{e}"))),
+        ConfigError::InvalidSyntax(e) => eprintln(format_cow(format_args!("{e}"))),
+        ConfigError::InvalidFields(errors) => {
+            for e in errors {
+                eprintln(e.as_str());
+            }
+        }
+    }
+
+    std::process::exit(1);
+}
+
+fn start_parent_using_config(config: PathBuf) -> io::Result<ExitResult> {
+    crate::ffi::check_parent_uid_gid()?;
+    start_parent(load_config(config)?)
+}
+
+fn start_parent_using_flags(args: ParentArgs) -> io::Result<ExitResult> {
+    crate::ffi::check_parent_uid_gid()?;
+    start_parent(args)
 }

@@ -1,0 +1,7 @@
+[global]
+port = 8080
+key_dir = '/tmp/integ-test.keys'
+
+[https]
+certificate = '/tmp/integ-test-cert.pem'
+private_key = '/tmp/integ-test-key.pem'

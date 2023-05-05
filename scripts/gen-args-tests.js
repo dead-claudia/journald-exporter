@@ -54,6 +54,13 @@ const portParams = toParams(["-p", "--port"])
 const keyDirParams = toParams(["-k", "--key-dir"])
 const certificateParams = toParams(["-C", "--certificate"])
 const privateKeyParams = toParams(["-K", "--private-key"])
+const checkParams = toParams(["-c", "--check"])
+const configParams = {
+    all: [
+        ["", `--config", "`],
+        ["_eq", `--config=`],
+    ]
+}
 
 generate("port", [
     ...portParams.split.map(([name, value]) => ({
@@ -115,7 +122,7 @@ generate("key_dir", [
         expect: `Err(ArgsError::MissingKeyDir)`,
     })),
     ...keyDirParams.all.map(([name, source]) => ({
-        name: `${name}_arg_without_port_returns_empty_key_dir`,
+        name: `${name}_arg_with_empty_value_returns_empty_key_dir`,
         test: `"${source}"`,
         expect: `Err(ArgsError::EmptyKeyDir)`,
     })),
@@ -143,7 +150,7 @@ generate("certificate", [
         expect: `Err(ArgsError::MissingCertificate)`,
     })),
     ...certificateParams.all.map(([name, source]) => ({
-        name: `${name}_arg_without_private_key_returns_empty_certificate`,
+        name: `${name}_arg_with_empty_value_returns_empty_certificate`,
         test: `"-p", "123", "-k", "some/dir", "${source}"`,
         expect: `Err(ArgsError::EmptyCertificate)`,
     })),
@@ -171,7 +178,7 @@ generate("private_key", [
         expect: `Err(ArgsError::MissingPrivateKey)`,
     })),
     ...privateKeyParams.all.map(([name, source]) => ({
-        name: `${name}_arg_without_port_returns_empty_private_key`,
+        name: `${name}_arg_with_empty_value_returns_empty_private_key`,
         test: `"-p", "123", "-k", "some/dir", "${source}"`,
         expect: `Err(ArgsError::EmptyPrivateKey)`,
     })),
@@ -189,6 +196,59 @@ generate("private_key", [
         name: `${name}_normal_private_key_path_without_certificate_returns_missing_certificate`,
         test: `"-p", "123", "-k", "some/dir", "${source}some/key.pem"`,
         expect: `Err(ArgsError::MissingCertificate)`,
+    })),
+])
+
+generate("config", [
+    {
+        name: `config_start_returns_missing_config`,
+        test: `"--config"`,
+        expect: `Err(ArgsError::MissingConfig)`,
+    },
+    ...configParams.all.map(([name, source]) => ({
+        name: `config${name}_arg_with_empty_value_returns_empty_config`,
+        test: `"${source}"`,
+        expect: `Err(ArgsError::EmptyConfig)`,
+    })),
+    ...configParams.all.map(([name, source]) => ({
+        name: `config${name}_arg_ending_in_colon_returns_parent_config`,
+        test: `"${source}blah:"`,
+        expect: `Ok(Args::ParentConfig(std::path::PathBuf::from("blah:")))`,
+    })),
+    ...configParams.all.map(([name, source]) => ({
+        name: `config${name}_arg_with_special_chars_returns_parent_config`,
+        test: `"${source}b/l@a!h:"`,
+        expect: `Ok(Args::ParentConfig(std::path::PathBuf::from("b/l@a!h:")))`,
+    })),
+    ...configParams.all.map(([name, source]) => ({
+        name: `config${name}_normal_path_returns_parent_config`,
+        test: `"${source}some/config.toml"`,
+        expect: `Ok(Args::ParentConfig(std::path::PathBuf::from("some/config.toml")))`,
+    })),
+    ...checkParams.split.map(([name, value]) => ({
+        name: `check_${name}_start_returns_missing_config`,
+        test: `"${value}"`,
+        expect: `Err(ArgsError::MissingConfig)`,
+    })),
+    ...checkParams.all.map(([name, source]) => ({
+        name: `check_${name}_arg_with_empty_value_returns_empty_config`,
+        test: `"${source}"`,
+        expect: `Err(ArgsError::EmptyConfig)`,
+    })),
+    ...checkParams.all.map(([name, source]) => ({
+        name: `check_${name}_arg_ending_in_colon_returns_check_config`,
+        test: `"${source}blah:"`,
+        expect: `Ok(Args::Check(std::path::PathBuf::from("blah:")))`,
+    })),
+    ...checkParams.all.map(([name, source]) => ({
+        name: `check_${name}_arg_with_special_chars_returns_check_config`,
+        test: `"${source}b/l@a!h:"`,
+        expect: `Ok(Args::Check(std::path::PathBuf::from("b/l@a!h:")))`,
+    })),
+    ...checkParams.all.map(([name, source]) => ({
+        name: `check_${name}_normal_private_key_path_returns_check_config`,
+        test: `"${source}some/config.toml"`,
+        expect: `Ok(Args::Check(std::path::PathBuf::from("some/config.toml")))`,
     })),
 ])
 

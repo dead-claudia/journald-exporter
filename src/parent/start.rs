@@ -23,7 +23,6 @@ static NATIVE_JOURNALD_PROVIDER: OnceCell<NativeSystemdProvider> = OnceCell::new
 static IPC_STATE: ParentIpcState<NativeIpcMethods> = ParentIpcState::new(NativeIpcMethods::new());
 
 pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
-    check_parent_uid_gid()?;
     let child_user_group = get_child_uid_gid()?;
     let provider = NativeSystemdProvider::open_provider()?;
 
@@ -71,19 +70,6 @@ fn load_tls_config(tls: Option<TLSOptions>) -> io::Result<Option<TLSConfig>> {
             Ok(Some(config))
         }
     }
-}
-
-fn check_parent_uid_gid() -> io::Result<()> {
-    // Verify it's running as root and then get the UID and GID of the child.
-
-    if current_uid() != ROOT_UID || current_gid() != ROOT_GID {
-        return Err(error!("This program is intended to be run as root."));
-    }
-
-    set_euid(ROOT_UID)?;
-    set_egid(ROOT_GID)?;
-
-    Ok(())
 }
 
 fn get_child_uid_gid() -> io::Result<UserGroup> {

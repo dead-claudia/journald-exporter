@@ -34,6 +34,7 @@ const args = {
     port: 8080,
     binary: path.resolve("target/release/journald-exporter"),
     type: "http",
+    format: "flags",
 }
 
 let argName
@@ -56,8 +57,13 @@ for (const arg of process.argv.slice(2)) {
             args.binary = path.resolve(arg)
             break
 
+        case "-f":
+            if (arg !== "flags" && arg !== "config") bail("Input format must be either `flags` or `config`.")
+            args.format = arg
+            break
+
         case "-t":
-            if (arg !== "http" && arg !== "https") bail("Release binary path must not be empty.")
+            if (arg !== "http" && arg !== "https") bail("Type must be either `http` or `https`.")
             args.type = arg
             break
 
@@ -72,6 +78,10 @@ for (const arg of process.argv.slice(2)) {
 }
 
 if (argName) bail(`Expected a value for argument \`${argName}\``)
+if (args.format === "config" && args.port !== 8080) {
+    bail("Custom ports cannot be run when a config is used - the port is hard-coded.")
+}
+
 if (process.getuid() !== 0) bail("This script must run as root")
 
 if (!fs.existsSync("/tmp/integ-test.keys")) bail("API key directory missing. Did you forget to run 'scripts/e2e-setup.sh' first?")
@@ -208,11 +218,13 @@ const child = child_process.spawn(
         "--property=WatchdogSec=5s",
         "--property=TimeoutStartSec=5s",
         args.binary,
-        "--port", args.port,
-        "--key-dir", "/tmp/integ-test.keys",
-        ...(args.type === "http" ? [] : [
-            "--certificate", "/tmp/integ-test-cert.pem",
-            "--private-key", "/tmp/integ-test-key.pem",
+        ...(args.format === "config" ? ["--config", path.resolve(__dirname, `../test-configs/valid-${args.type}`)] : [
+            "--port", args.port,
+            "--key-dir", "/tmp/integ-test.keys",
+            ...(args.type === "http" ? [] : [
+                "--certificate", "/tmp/integ-test-cert.pem",
+                "--private-key", "/tmp/integ-test-key.pem",
+            ])
         ])
     ],
     {stdio: ["ignore", "inherit", "pipe"], signal: killCtrl.signal},

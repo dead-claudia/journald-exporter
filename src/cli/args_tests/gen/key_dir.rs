@@ -23,7 +23,7 @@ fn long_start_returns_missing_key_dir() {
 }
 
 #[test]
-fn short_arg_without_port_returns_empty_key_dir() {
+fn short_arg_with_empty_value_returns_empty_key_dir() {
     assert_eq!(
         parse_args(&["journald-exporter", "-k", ""]),
         Err(ArgsError::EmptyKeyDir),
@@ -31,7 +31,7 @@ fn short_arg_without_port_returns_empty_key_dir() {
 }
 
 #[test]
-fn short_eq_arg_without_port_returns_empty_key_dir() {
+fn short_eq_arg_with_empty_value_returns_empty_key_dir() {
     assert_eq!(
         parse_args(&["journald-exporter", "-k="]),
         Err(ArgsError::EmptyKeyDir),
@@ -39,7 +39,7 @@ fn short_eq_arg_without_port_returns_empty_key_dir() {
 }
 
 #[test]
-fn long_arg_without_port_returns_empty_key_dir() {
+fn long_arg_with_empty_value_returns_empty_key_dir() {
     assert_eq!(
         parse_args(&["journald-exporter", "--key-dir", ""]),
         Err(ArgsError::EmptyKeyDir),
@@ -47,7 +47,7 @@ fn long_arg_without_port_returns_empty_key_dir() {
 }
 
 #[test]
-fn long_eq_arg_without_port_returns_empty_key_dir() {
+fn long_eq_arg_with_empty_value_returns_empty_key_dir() {
     assert_eq!(
         parse_args(&["journald-exporter", "--key-dir="]),
         Err(ArgsError::EmptyKeyDir),

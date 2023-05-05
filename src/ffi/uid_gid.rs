@@ -40,6 +40,21 @@ pub fn set_egid(id: u32) -> io::Result<()> {
     Ok(())
 }
 
+pub fn check_parent_uid_gid() -> io::Result<()> {
+    assert_not_miri();
+    // Verify it's running as root, and then ensure the effective permissions are root permissions
+    // to avoid unexpected bugs.
+
+    if current_uid() != ROOT_UID || current_gid() != ROOT_GID {
+        return Err(error!("This program is intended to be run as root."));
+    }
+
+    set_euid(ROOT_UID)?;
+    set_egid(ROOT_GID)?;
+
+    Ok(())
+}
+
 // These are stubbed out in Miri, so there's no real point in "testing" them.
 #[cfg(all(test, not(miri)))]
 mod tests {
