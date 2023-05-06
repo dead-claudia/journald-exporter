@@ -10,14 +10,8 @@ fn message_key(
 ) -> MessageKey {
     let mut key = MessageKey::new();
 
-    if let Some(raw) = uid {
-        key.table_key.uid = Some(raw);
-    }
-
-    if let Some(raw) = gid {
-        key.table_key.gid = Some(raw);
-    }
-
+    key.uid = uid;
+    key.gid = gid;
     key.priority = priority;
 
     if let Some(service) = service {

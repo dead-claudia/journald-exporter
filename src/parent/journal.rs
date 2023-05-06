@@ -196,12 +196,12 @@ impl<M: ParentIpcMethods> MessageReader<M> {
 
     fn try_read_uid(&mut self, j: &mut impl JournalRef) -> io::Result<bool> {
         self.inner
-            .try_read_id(j, UID, &mut self.malformed.uid, &mut self.key.table_key.uid)
+            .try_read_id(j, UID, &mut self.malformed.uid, &mut self.key.uid)
     }
 
     fn try_read_gid(&mut self, j: &mut impl JournalRef) -> io::Result<bool> {
         self.inner
-            .try_read_id(j, GID, &mut self.malformed.gid, &mut self.key.table_key.gid)
+            .try_read_id(j, GID, &mut self.malformed.gid, &mut self.key.gid)
     }
 
     fn try_read_msg(&mut self, j: &mut impl JournalRef) -> io::Result<()> {

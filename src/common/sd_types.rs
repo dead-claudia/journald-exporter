@@ -178,8 +178,7 @@ impl<'a> Service<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(test, derive(Copy))]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ServiceRepr {
     service_len: u16,
     //             [u8; MAX_SERVICE_LEN]

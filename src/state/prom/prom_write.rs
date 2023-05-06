@@ -199,7 +199,7 @@ impl Writer {
                 return false;
             }
 
-            snapshot.each_while(|priority, data| {
+            snapshot.each_while(|data| {
                 let head = write_u64(
                     &mut self.value_buffer,
                     match constants.kind {
@@ -209,8 +209,8 @@ impl Writer {
                 );
 
                 let service_bytes = data.key.service().map(|s| s.as_bytes()).unwrap_or(b"?");
-                let priority_name = priority.as_name_bytes();
-                let priority_severity = [priority.as_severity_byte()];
+                let priority_name = data.key.priority.as_name_bytes();
+                let priority_severity = [data.key.priority.as_severity_byte()];
                 let user_name = data_bytes_from_id(&table.uids, &data.key.uid);
                 let group_name = data_bytes_from_id(&table.gids, &data.key.gid);
 

@@ -1,98 +1,47 @@
 use crate::prelude::*;
 
-use super::ByteCountTableKey;
-use super::MessageKey;
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Clone, Copy))]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ByteCountSnapshotEntry {
     pub key: MessageKey,
     pub lines: u64,
     pub bytes: u64,
 }
 
-// `repr(C)` to ensure the order's well-defined.
-#[repr(C)]
-#[derive(Debug, PartialEq, Eq)]
-pub struct ByteCountTableEntrySnapshot {
-    pub lines: u64,
-    pub bytes: u64,
-    pub key: ByteCountTableKey,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct ByteCountSnapshot {
-    // The last entry of "priority" 8 is the fallback.
-    priority_table: [Box<[ByteCountTableEntrySnapshot]>; 8],
+    snapshot: Box<[ByteCountSnapshotEntry]>,
 }
 
 impl ByteCountSnapshot {
     #[cfg(test)]
     pub fn empty() -> Self {
         Self {
-            priority_table: [
-                Box::new([]),
-                Box::new([]),
-                Box::new([]),
-                Box::new([]),
-                Box::new([]),
-                Box::new([]),
-                Box::new([]),
-                Box::new([]),
-            ],
+            snapshot: Box::new([]),
         }
+    }
+
+    fn new(mut snapshot: Box<[ByteCountSnapshotEntry]>) -> Self {
+        // To ensure there's a defined order for a much easier time testing.
+        snapshot.sort_unstable_by(|a, b| a.key.cmp(&b.key));
+        Self { snapshot }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.priority_table.iter().all(|t| t.is_empty())
+        self.snapshot.is_empty()
     }
 
-    pub fn each_while(
-        &self,
-        mut receiver: impl FnMut(Priority, &ByteCountTableEntrySnapshot) -> bool,
-    ) -> bool {
-        for (i, table) in self.priority_table.iter().enumerate() {
-            let priority = Priority::from_severity_index(truncate_usize_u8(i)).unwrap();
-            for item in &**table {
-                if !receiver(priority, item) {
-                    return false;
-                }
-            }
-        }
-        true
+    pub fn each_while(&self, receiver: impl FnMut(&ByteCountSnapshotEntry) -> bool) -> bool {
+        self.snapshot.iter().all(receiver)
     }
 
     #[cfg(test)]
     pub fn build(data: impl IntoIterator<Item = ByteCountSnapshotEntry>) -> Self {
-        let mut result = [
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        ];
-        for item in data {
-            let priority_index = zero_extend_u8_usize(item.key.priority.as_severity_index());
-            let entry = ByteCountTableEntrySnapshot {
-                key: item.key.table_key,
-                lines: item.lines,
-                bytes: item.bytes,
-            };
-            result[priority_index].push(entry);
-        }
-
-        Self {
-            priority_table: result.map(Box::from),
-        }
+        Self::new(Box::from_iter(data))
     }
 }
 
-// `repr(C)` to ensure the order's well-defined.
-#[repr(C)]
 struct ByteCountData {
     lines: Counter,
     bytes: Counter,
@@ -125,40 +74,19 @@ impl ByteCountMap {
     }
 
     pub fn snapshot(&self) -> Option<ByteCountSnapshot> {
-        let mut priority_table: [Vec<ByteCountTableEntrySnapshot>; 8] = [
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        ];
+        let mut snapshot = Vec::new();
 
         if let Some(table) = &*self.table.read().unwrap_or_else(|e| e.into_inner()) {
             for (key, value) in table {
-                // It's not copyable in production, as it's supposed to be minimally copied in
-                // general (in no small part due to its size).
-                #[allow(clippy::clone_on_copy)]
-                priority_table[zero_extend_u8_usize(key.priority.as_severity_index())].push(
-                    ByteCountTableEntrySnapshot {
-                        lines: value.lines.current(),
-                        bytes: value.bytes.current(),
-                        key: key.table_key.clone(),
-                    },
-                );
+                snapshot.push(ByteCountSnapshotEntry {
+                    key: *key,
+                    lines: value.lines.current(),
+                    bytes: value.bytes.current(),
+                });
             }
         }
 
-        // To ensure there's a defined order for a much easier time testing.
-        for snapshot in &mut priority_table {
-            snapshot.sort_by(|a, b| a.key.cmp(&b.key));
-        }
-
-        Some(ByteCountSnapshot {
-            priority_table: priority_table.map(Into::into),
-        })
+        Some(ByteCountSnapshot::new(snapshot.into()))
     }
 
     // Take a reference to avoid a copy.
@@ -205,14 +133,6 @@ impl ByteCountMap {
 
             // It's not copyable in production, as it's supposed to be minimally copied in
             // general (in no small part due to its size).
-            #[allow(clippy::clone_on_copy)]
-            let cloned = key.clone();
-
-            let entry = ByteCountData {
-                lines: Counter::new(1),
-                bytes: Counter::new(zero_extend_usize_u64(msg_len)),
-            };
-
             let target = write_lock.get_or_insert_with(HashMap::new);
 
             // Just error. It's not fatal, just results in table state issues.
@@ -221,7 +141,13 @@ impl ByteCountMap {
                 return false;
             }
 
-            target.insert(cloned, entry);
+            target.insert(
+                *key,
+                ByteCountData {
+                    lines: Counter::new(1),
+                    bytes: Counter::new(zero_extend_usize_u64(msg_len)),
+                },
+            );
         }
 
         true
