@@ -2,6 +2,7 @@
 
 mod certificate;
 mod certificate_and_private_key;
+mod config;
 mod key_dir;
 mod port;
 mod port_and_key_dir;

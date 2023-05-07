@@ -178,7 +178,10 @@ mod tests {
     use crate::ffi::ExitResult;
     use crate::parent::key_watcher::KeyWatcherTarget;
 
-    fn init_mock_ipc_dynamic(s: &'static ParentIpcState<FakeIpcChildHandle>) {
+    #[must_use]
+    fn init_mock_ipc_dynamic(s: &'static ParentIpcState<FakeIpcChildHandle>) -> MonitorFilterLease {
+        // SAFETY: The lease is held for the entire duration that the state is in use.
+        let lease = unsafe { s.state().initialize_monitor_filter(None) };
         s.init_dynamic(ParentIpcDynamic {
             port: std::num::NonZeroU16::new(1).unwrap(),
             child_user_group: UserGroup {
@@ -189,6 +192,7 @@ mod tests {
             key_target: KeyWatcherTarget::new(std::path::PathBuf::new()),
             tls_config: None,
         });
+        lease
     }
 
     #[test]
@@ -196,7 +200,7 @@ mod tests {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
 
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
         S.methods().child_spawn.enqueue_io(Ok((
@@ -242,7 +246,7 @@ mod tests {
     fn spawn_child_join_fail_works() {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
         S.methods().child_spawn.enqueue_io(Ok((
@@ -288,7 +292,7 @@ mod tests {
     fn spawn_child_spawn_fail_works() {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
 
         S.methods().child_spawn.enqueue_io(Err(libc::ENOENT));
 
@@ -304,7 +308,7 @@ mod tests {
     fn spawn_child_handles_input_close() {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
         S.methods().child_spawn.enqueue_io(Ok((
@@ -342,7 +346,7 @@ mod tests {
     fn spawn_child_handles_write() {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
         S.methods().child_spawn.enqueue_io(Ok((
@@ -382,7 +386,7 @@ mod tests {
     fn spawn_child_enqueues_read_ok() {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
         S.methods().child_spawn.enqueue_io(Ok((
@@ -426,7 +430,7 @@ mod tests {
     fn spawn_child_output_enqueues_read_error() {
         static S: ParentIpcState<FakeIpcChildHandle> =
             ParentIpcState::new(FakeIpcChildHandle::new());
-        init_mock_ipc_dynamic(&S);
+        let _lease = init_mock_ipc_dynamic(&S);
         static SPAWN_CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
 
         S.methods().child_spawn.enqueue_io(Ok((

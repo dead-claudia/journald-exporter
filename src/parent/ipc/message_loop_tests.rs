@@ -20,7 +20,7 @@ fn reads_immediate_error() {
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     S.enqueue_child_output(Err(libc::EPIPE));
 
@@ -41,7 +41,7 @@ fn reads_interrupt_then_immediate_error() {
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     S.enqueue_child_output(Err(libc::EINTR));
     S.enqueue_child_output(Err(libc::EAGAIN));
@@ -64,7 +64,7 @@ fn read_header_then_empty_request() {
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -101,7 +101,7 @@ fn read_header_then_request_keys() {
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
 
-    S.init_test_state_with_key_dir(key_dir.path().to_owned());
+    let _lease = S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -132,7 +132,7 @@ fn read_header_then_request_metrics() {
     let guard = setup_capture_logger();
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -164,12 +164,19 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -200,7 +207,7 @@ fn read_header_then_in_same_chunk_track_request_then_request_metrics() {
     let guard = setup_capture_logger();
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -232,12 +239,19 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -271,7 +285,7 @@ fn read_header_then_track_request_then_request_metrics() {
     let guard = setup_capture_logger();
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -303,12 +317,19 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -340,7 +361,7 @@ fn read_header_then_request_metrics_then_track_request() {
     let guard = setup_capture_logger();
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -372,12 +393,19 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -415,7 +443,7 @@ fn read_header_then_in_same_chunk_request_keys_then_request_metrics() {
     static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -447,6 +475,13 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
@@ -455,7 +490,7 @@ journald_messages_ingested_bytes_total 0
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state_with_key_dir(key_dir.path().to_owned());
+    let _lease = S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -493,7 +528,7 @@ fn read_header_then_in_same_chunk_keys_then_track_then_metrics_then_track() {
     static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -525,6 +560,13 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
@@ -533,7 +575,7 @@ journald_messages_ingested_bytes_total 0
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state_with_key_dir(key_dir.path().to_owned());
+    let _lease = S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -576,7 +618,7 @@ fn read_header_then_in_same_chunk_request_metrics_then_request_keys() {
     static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -608,6 +650,13 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
@@ -616,7 +665,7 @@ journald_messages_ingested_bytes_total 0
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state_with_key_dir(key_dir.path().to_owned());
+    let _lease = S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -654,7 +703,7 @@ fn read_header_then_request_keys_then_request_metrics() {
     static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -686,6 +735,13 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
@@ -694,7 +750,7 @@ journald_messages_ingested_bytes_total 0
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state_with_key_dir(key_dir.path().to_owned());
+    let _lease = S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -733,7 +789,7 @@ fn read_header_then_request_metrics_then_request_keys() {
     static EXPECTED_KEY_SET: &[u8] = b"\x01\x01\x100123456789abcdef";
 
     static EXPECTED_EXPOSITION: &[u8] =
-        b"\x00\x02\x05\x00\x00# TYPE journald_entries_ingested counter
+        b"\x00\x0F\x06\x00\x00# TYPE journald_entries_ingested counter
 journald_entries_ingested_created 123.456
 journald_entries_ingested_total 0
 # TYPE journald_fields_ingested counter
@@ -765,6 +821,13 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ";
 
@@ -773,7 +836,7 @@ journald_messages_ingested_bytes_total 0
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state_with_key_dir(key_dir.path().to_owned());
+    let _lease = S.init_test_state_with_key_dir(key_dir.path().to_owned());
 
     // Also test that it's retried on interrupt.
     S.enqueue_child_output(Err(libc::EINTR));
@@ -807,7 +870,7 @@ fn bails_on_immediately_disconnected_receiver_when_handling_request_metrics() {
 
     static S: StaticState = StaticState::new();
     let _watcher_guard = S.state.terminate_notify().create_guard();
-    S.init_test_state();
+    let _lease = S.init_test_state();
 
     S.enqueue_child_output(Ok(&ipc::VERSION_BYTES));
     S.enqueue_child_output_ok_spy(

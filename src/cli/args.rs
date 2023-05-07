@@ -27,6 +27,8 @@ pub struct ParentArgs {
 pub enum Args {
     Child,
     Parent(ParentArgs),
+    ParentConfig(PathBuf),
+    Check(PathBuf),
 }
 
 #[derive(Debug, PartialEq)]
@@ -41,6 +43,8 @@ pub enum ArgsError {
     EmptyCertificate,
     MissingPrivateKey,
     EmptyPrivateKey,
+    MissingConfig,
+    EmptyConfig,
     UnknownFlag(OsString),
 }
 
@@ -57,6 +61,8 @@ impl ArgsError {
             ArgsError::EmptyCertificate => Cow::Borrowed("Certificate file cannot be empty."),
             ArgsError::MissingPrivateKey => Cow::Borrowed("Private key file missing."),
             ArgsError::EmptyPrivateKey => Cow::Borrowed("Private key file cannot be empty."),
+            ArgsError::MissingConfig => Cow::Borrowed("Config file missing."),
+            ArgsError::EmptyConfig => Cow::Borrowed("Config file cannot be empty."),
             ArgsError::UnknownFlag(option) => {
                 let mut result = String::new();
                 result.push_str("Unknown flag or option: '");
@@ -75,6 +81,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
         ExpectKeyDir,
         ExpectCertificate,
         ExpectPrivateKey,
+        ExpectConfig,
+        ExpectCheck,
     }
 
     let mut state = ArgState::Initial;
@@ -99,8 +107,11 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
         }
     }
 
+    let mut has_arg = false;
+
     // Skip the first argument - it's the executable.
     for arg in args.into_iter().skip(1) {
+        has_arg = true;
         match state {
             ArgState::Initial => match arg.as_bytes() {
                 b"-help" | b"--help" | b"-h" | b"-?" => return Err(ArgsError::ShowHelp),
@@ -110,6 +121,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 b"-C" | b"--certificate" => state = ArgState::ExpectCertificate,
                 b"-K" | b"--private-key" => state = ArgState::ExpectPrivateKey,
                 b"--child-process" => return Ok(Args::Child),
+                b"--config" => state = ArgState::ExpectConfig,
+                b"-c" | b"--check" => state = ArgState::ExpectCheck,
 
                 // Short option equals
                 [b'-', b'p', b'=', arg @ ..] => {
@@ -123,6 +136,9 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 }
                 [b'-', b'K', b'=', arg @ ..] => {
                     private_key = Some(parse_path(arg, ArgsError::EmptyPrivateKey)?);
+                }
+                [b'-', b'c', b'=', arg @ ..] => {
+                    return Ok(Args::Check(parse_path(arg, ArgsError::EmptyConfig)?));
                 }
 
                 // `--port=`
@@ -143,6 +159,14 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 {
                     private_key = Some(parse_path(arg, ArgsError::EmptyPrivateKey)?);
                 }
+                // `--config=`
+                [b'-', b'-', b'c', b'o', b'n', b'f', b'i', b'g', b'=', arg @ ..] => {
+                    return Ok(Args::ParentConfig(parse_path(arg, ArgsError::EmptyConfig)?));
+                }
+                // `--check=`
+                [b'-', b'-', b'c', b'h', b'e', b'c', b'k', b'=', arg @ ..] => {
+                    return Ok(Args::Check(parse_path(arg, ArgsError::EmptyConfig)?));
+                }
 
                 _ => return Err(ArgsError::UnknownFlag(arg)),
             },
@@ -162,7 +186,23 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
                 state = ArgState::Initial;
                 private_key = Some(parse_path(arg.as_bytes(), ArgsError::EmptyPrivateKey)?);
             }
+            ArgState::ExpectConfig => {
+                return Ok(Args::ParentConfig(parse_path(
+                    arg.as_bytes(),
+                    ArgsError::EmptyConfig,
+                )?))
+            }
+            ArgState::ExpectCheck => {
+                return Ok(Args::Check(parse_path(
+                    arg.as_bytes(),
+                    ArgsError::EmptyConfig,
+                )?))
+            }
         }
+    }
+
+    if !has_arg {
+        return Err(ArgsError::ShowHelp);
     }
 
     match state {
@@ -189,5 +229,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, Args
         ArgState::ExpectKeyDir => Err(ArgsError::MissingKeyDir),
         ArgState::ExpectCertificate => Err(ArgsError::MissingCertificate),
         ArgState::ExpectPrivateKey => Err(ArgsError::MissingPrivateKey),
+        ArgState::ExpectConfig => Err(ArgsError::MissingConfig),
+        ArgState::ExpectCheck => Err(ArgsError::MissingConfig),
     }
 }

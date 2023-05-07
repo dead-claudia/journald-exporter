@@ -15,9 +15,21 @@ pub static HELP_STRING: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     r#"
 
-Usage: journald-exporter --port PORT --key-dir KEY_DIRECTORY
+Usage:
+    journald-exporter --port PORT --key-dir KEY_DIRECTORY
+    journald-exporter --config CONFIG_FILE
+    journald-exporter --check CONFIG_FILE
 
 Arguments:
+
+-h, -?, -help, --help
+    Print this help info. This is also done when no arguments are given. (It's
+    pretty lax since if you're wanting help, you probably don't even know how
+    to invoke it.)
+
+-v, -V, -version, --version
+    Print this utility's version info. (It's lax so you don't have to think
+    too hard about how to get it.)
 
 -p PORT, --port PORT
     The port to expose the metrics server from.
@@ -33,18 +45,25 @@ Arguments:
     The PEM-encoded file with the private key to use for HTTPS. Must be used
     in conjunction with `-C`/`--certificate`.
 
+--config CONFIG_FILE
+    A config file to use. Other operands are ignored in this case.
+
+-c CONFIG_FILE, --check CONFIG_FILE
+    A config file to check. Other operands are ignored in this case.
+
 Notes:
 
-  - When run as root, a `journald-exporter` user is expected to exist, and the
-    web server is opened and run under that user. When run normally, any user
-    will do, and the web server is run with that user's privileges.
+  - Except for `--check`, the program must be running as root.
+
+  - A `journald-exporter` user is expected to exist, and the web server is
+    opened and run under that user.
 
   - The server exposes a single `/metrics` endpoint that returns metrics.
     Authorization uses the HTTP basic authorization protocol, with a user of
     `metrics` and a password that's one of the accepted API keys. The endpoint
     is rate-limited to one request per second per source IP, and it does not
-    attempt to inspect either of the Forwarded or X-Forwarded-For headers to
-    determine the "true" client IP.
+    attempt to inspect either of the `Forwarded` or `X-Forwarded-For` headers
+    to determine the "true" client IP.
 
   - The key directory is watched, so new API keys can be added and removed
     without having to restart the server. It can also have multiple key files,

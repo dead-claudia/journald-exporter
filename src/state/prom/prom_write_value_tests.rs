@@ -97,6 +97,13 @@ journald_messages_ingested_total 0
 # UNIT journald_messages_ingested_bytes bytes
 journald_messages_ingested_bytes_created 123.456
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created 123.456
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created 123.456
+journald_monitor_hits_bytes_total 0
 # EOF
 ",
     ]);
@@ -112,6 +119,7 @@ journald_messages_ingested_bytes_total 0
             corrupted_fields: 0,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
         123,
         456,
@@ -285,6 +293,15 @@ journald_messages_ingested_total 0
 journald_messages_ingested_bytes_created ",
         b"
 journald_messages_ingested_bytes_total 0
+# TYPE journald_monitor_hits counter
+journald_monitor_hits_created ",
+        b"
+journald_monitor_hits_total 0
+# TYPE journald_monitor_hits_bytes counter
+# UNIT journald_monitor_hits_bytes bytes
+journald_monitor_hits_bytes_created ",
+        b"
+journald_monitor_hits_bytes_total 0
 # EOF
 ",
     ]);
@@ -300,6 +317,7 @@ journald_messages_ingested_bytes_total 0
             corrupted_fields: 0,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
         secs,
         millis,

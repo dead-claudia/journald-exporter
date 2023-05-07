@@ -154,10 +154,29 @@ jobs:
       - run: cargo +nightly miri setup
       - run: cargo +nightly miri test --all-targets ${{ matrix.module }} -- --show-output
 
+  check_tests:
+    name: '`journald-exporter --check` tests'
+    needs:
+      - unit_tests
+    strategy:
+      matrix:
+        os:
+        - ubuntu-20.04
+        - ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    if: success() || cancelled()
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: journald-exporter
+      - run: chmod +x journald-exporter
+      - run: ./scripts/check-tests.sh
+
   e2e_tests:
     name: End-to-end tests (release)
     needs:
-      - unit_tests
+      - check_tests
     strategy:
       matrix:
         os:
@@ -166,6 +185,9 @@ jobs:
         type:
         - http
         - https
+        format:
+        - flags
+        - config
     runs-on: ${{ matrix.os }}
     if: success() || cancelled()
     steps:
@@ -175,4 +197,4 @@ jobs:
           name: journald-exporter
       - run: chmod +x journald-exporter
       - run: sudo ./scripts/e2e-setup.sh
-      - run: sudo node ./scripts/e2e.js -b journald-exporter -t ${{ matrix.type }}
+      - run: sudo node ./scripts/e2e.js -b journald-exporter -t ${{ matrix.type }} -f ${{ matrix.format }}

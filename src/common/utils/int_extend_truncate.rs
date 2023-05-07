@@ -78,6 +78,10 @@ pub const fn truncate_i32_u8(value: i32) -> u8 {
     value as u8
 }
 
+pub const fn truncate_i64_u8(value: i64) -> u8 {
+    value as u8
+}
+
 pub const fn truncate_u32_u8(value: u32) -> u8 {
     value as u8
 }
@@ -108,4 +112,8 @@ pub const fn truncate_usize_u16(value: usize) -> u16 {
 
 pub const fn truncate_usize_u32(value: usize) -> u32 {
     value as u32
+}
+
+pub const fn truncate_u64_usize(value: u64) -> usize {
+    value as usize
 }

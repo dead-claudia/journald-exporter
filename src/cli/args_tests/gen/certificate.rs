@@ -30,7 +30,7 @@ fn long_start_returns_missing_certificate() {
 }
 
 #[test]
-fn short_arg_without_private_key_returns_empty_certificate() {
+fn short_arg_with_empty_value_returns_empty_certificate() {
     assert_eq!(
         parse_args(&["journald-exporter", "-p", "123", "-k", "some/dir", "-C", ""]),
         Err(ArgsError::EmptyCertificate),
@@ -38,7 +38,7 @@ fn short_arg_without_private_key_returns_empty_certificate() {
 }
 
 #[test]
-fn short_eq_arg_without_private_key_returns_empty_certificate() {
+fn short_eq_arg_with_empty_value_returns_empty_certificate() {
     assert_eq!(
         parse_args(&["journald-exporter", "-p", "123", "-k", "some/dir", "-C="]),
         Err(ArgsError::EmptyCertificate),
@@ -46,7 +46,7 @@ fn short_eq_arg_without_private_key_returns_empty_certificate() {
 }
 
 #[test]
-fn long_arg_without_private_key_returns_empty_certificate() {
+fn long_arg_with_empty_value_returns_empty_certificate() {
     assert_eq!(
         parse_args(&[
             "journald-exporter",
@@ -62,7 +62,7 @@ fn long_arg_without_private_key_returns_empty_certificate() {
 }
 
 #[test]
-fn long_eq_arg_without_private_key_returns_empty_certificate() {
+fn long_eq_arg_with_empty_value_returns_empty_certificate() {
     assert_eq!(
         parse_args(&[
             "journald-exporter",

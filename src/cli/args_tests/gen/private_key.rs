@@ -30,7 +30,7 @@ fn long_start_returns_missing_private_key() {
 }
 
 #[test]
-fn short_arg_without_port_returns_empty_private_key() {
+fn short_arg_with_empty_value_returns_empty_private_key() {
     assert_eq!(
         parse_args(&["journald-exporter", "-p", "123", "-k", "some/dir", "-K", ""]),
         Err(ArgsError::EmptyPrivateKey),
@@ -38,7 +38,7 @@ fn short_arg_without_port_returns_empty_private_key() {
 }
 
 #[test]
-fn short_eq_arg_without_port_returns_empty_private_key() {
+fn short_eq_arg_with_empty_value_returns_empty_private_key() {
     assert_eq!(
         parse_args(&["journald-exporter", "-p", "123", "-k", "some/dir", "-K="]),
         Err(ArgsError::EmptyPrivateKey),
@@ -46,7 +46,7 @@ fn short_eq_arg_without_port_returns_empty_private_key() {
 }
 
 #[test]
-fn long_arg_without_port_returns_empty_private_key() {
+fn long_arg_with_empty_value_returns_empty_private_key() {
     assert_eq!(
         parse_args(&[
             "journald-exporter",
@@ -62,7 +62,7 @@ fn long_arg_without_port_returns_empty_private_key() {
 }
 
 #[test]
-fn long_eq_arg_without_port_returns_empty_private_key() {
+fn long_eq_arg_with_empty_value_returns_empty_private_key() {
     assert_eq!(
         parse_args(&[
             "journald-exporter",
