@@ -19,12 +19,15 @@ rustls = "0.21.1"
 base64 = "0.21.0"
 once_cell = "1.17.1"
 toml = { version = "0.7.3", features = ["parse"] }
+regex = "1.8.1"
 
 [dev-dependencies]
+assert_matches = "1.5.0"
 # Simplifies test setup and the `waitid` hack.
 ctor = "0.2.0"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
+rand = "0.8.5"
 tempfile = "3.4.0"
 
 [profile.test]

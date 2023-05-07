@@ -69,11 +69,17 @@ impl StaticState {
         StdinLease(self)
     }
 
-    pub fn init_test_state(&'static self) {
-        self.init_test_state_with_key_dir(std::path::PathBuf::new());
+    pub fn init_test_state(&'static self) -> MonitorFilterLease {
+        self.init_test_state_with_key_dir(std::path::PathBuf::new())
     }
 
-    pub fn init_test_state_with_key_dir(&'static self, key_dir: std::path::PathBuf) {
+    #[must_use]
+    pub fn init_test_state_with_key_dir(
+        &'static self,
+        key_dir: std::path::PathBuf,
+    ) -> MonitorFilterLease {
+        // SAFETY: The lease is held for the entire duration that the state is in use.
+        let lease = unsafe { self.state.state().initialize_monitor_filter(None) };
         self.state.init_dynamic(ParentIpcDynamic {
             port: std::num::NonZeroU16::new(1).unwrap(),
             child_user_group: UserGroup {
@@ -84,6 +90,7 @@ impl StaticState {
             key_target: KeyWatcherTarget::new(key_dir),
             tls_config: None,
         });
+        lease
     }
 
     pub fn run_ipc_spawn(

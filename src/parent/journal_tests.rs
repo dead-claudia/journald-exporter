@@ -29,6 +29,11 @@ impl TestState {
         }
     }
 
+    fn init_filter(&'static self) -> MonitorFilterLease {
+        // SAFETY: The lease is held for the entire duration that the state is in use.
+        unsafe { self.state.state().initialize_monitor_filter(None) }
+    }
+
     fn start(&'static self) -> io::Result<()> {
         run_journal_loop::<&FakeJournalRef>(&self.state, &self.provider)
     }
@@ -58,6 +63,7 @@ impl TestState {
 fn aborts_on_initial_watchdog_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Err(libc::EIO));
 
@@ -75,7 +81,8 @@ fn aborts_on_initial_watchdog_error() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         }
     );
     T.provider.assert_no_calls_remaining();
@@ -85,6 +92,7 @@ fn aborts_on_initial_watchdog_error() {
 fn aborts_on_initial_termination() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.state.terminate_notify().notify();
 
@@ -101,7 +109,8 @@ fn aborts_on_initial_termination() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -111,6 +120,7 @@ fn aborts_on_initial_termination() {
 fn aborts_on_early_fatal_open_failure() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Err(libc::EIO));
@@ -128,7 +138,8 @@ fn aborts_on_early_fatal_open_failure() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -138,6 +149,7 @@ fn aborts_on_early_fatal_open_failure() {
 fn aborts_on_early_fatal_set_data_threshold() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -159,7 +171,8 @@ fn aborts_on_early_fatal_set_data_threshold() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -169,6 +182,7 @@ fn aborts_on_early_fatal_set_data_threshold() {
 fn aborts_on_early_fatal_seek() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -192,7 +206,8 @@ fn aborts_on_early_fatal_seek() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -202,6 +217,7 @@ fn aborts_on_early_fatal_seek() {
 fn retries_on_out_of_descriptors() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Err(libc::EMFILE));
@@ -228,7 +244,8 @@ fn retries_on_out_of_descriptors() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -238,6 +255,7 @@ fn retries_on_out_of_descriptors() {
 fn retries_on_connection_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -276,7 +294,8 @@ fn retries_on_connection_error() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -286,6 +305,7 @@ fn retries_on_connection_error() {
 fn aborts_on_io_error_during_wait() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -311,7 +331,8 @@ fn aborts_on_io_error_during_wait() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -321,6 +342,7 @@ fn aborts_on_io_error_during_wait() {
 fn aborts_on_memory_error_during_next() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -347,7 +369,8 @@ fn aborts_on_memory_error_during_next() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -357,6 +380,7 @@ fn aborts_on_memory_error_during_next() {
 fn aborts_on_missing_cursor_after_next() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -384,7 +408,8 @@ fn aborts_on_missing_cursor_after_next() {
             unreadable_fields: 0,
             corrupted_fields: 0,
             metrics_requests: 0,
-            messages_ingested: ByteCountSnapshot::empty()
+            messages_ingested: ByteCountSnapshot::empty(),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -394,6 +419,7 @@ fn aborts_on_missing_cursor_after_next() {
 fn pushes_entry_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -435,6 +461,7 @@ fn pushes_entry_then_aborts_on_wait_error() {
             corrupted_fields: 0,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     Some(123),
@@ -443,7 +470,8 @@ fn pushes_entry_then_aborts_on_wait_error() {
                 ),
                 lines: 1,
                 bytes: 9,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -453,6 +481,7 @@ fn pushes_entry_then_aborts_on_wait_error() {
 fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -494,6 +523,7 @@ fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
             corrupted_fields: 0,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     Some(123),
@@ -502,7 +532,8 @@ fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
                 ),
                 lines: 1,
                 bytes: 0,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -512,6 +543,7 @@ fn pushes_entry_with_empty_message_then_aborts_on_wait_error() {
 fn processes_unreadable_service_names_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -589,10 +621,12 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(Some(123), Some(123), None, Priority::Warning),
                 lines: 4,
                 bytes: 28,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -602,6 +636,7 @@ fn processes_unreadable_service_names_then_aborts_on_wait_error() {
 fn processes_unreadable_priorities_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -679,6 +714,7 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     Some(123),
@@ -687,7 +723,8 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
                 ),
                 lines: 4,
                 bytes: 28,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -697,6 +734,7 @@ fn processes_unreadable_priorities_then_aborts_on_wait_error() {
 fn processes_invalid_priority_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -740,6 +778,7 @@ fn processes_invalid_priority_then_aborts_on_wait_error() {
             corrupted_fields: 0,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     Some(123),
@@ -748,7 +787,8 @@ fn processes_invalid_priority_then_aborts_on_wait_error() {
                 ),
                 lines: 1,
                 bytes: 7,
-            }],)
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -758,6 +798,7 @@ fn processes_invalid_priority_then_aborts_on_wait_error() {
 fn processes_unreadable_uids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -835,6 +876,7 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     None,
                     Some(123),
@@ -843,7 +885,8 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
                 ),
                 lines: 4,
                 bytes: 28,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -853,6 +896,7 @@ fn processes_unreadable_uids_then_aborts_on_wait_error() {
 fn processes_invalid_uids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -932,6 +976,7 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     None,
                     Some(123),
@@ -940,7 +985,8 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
                 ),
                 lines: 4,
                 bytes: 28,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -950,6 +996,7 @@ fn processes_invalid_uids_then_aborts_on_wait_error() {
 fn processes_unreadable_gids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -1027,6 +1074,7 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     None,
@@ -1035,7 +1083,8 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
                 ),
                 lines: 4,
                 bytes: 28,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1045,6 +1094,7 @@ fn processes_unreadable_gids_then_aborts_on_wait_error() {
 fn processes_invalid_gids_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -1124,6 +1174,7 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     None,
@@ -1132,7 +1183,8 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
                 ),
                 lines: 4,
                 bytes: 28,
-            }])
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1142,6 +1194,7 @@ fn processes_invalid_gids_then_aborts_on_wait_error() {
 fn processes_unreadable_messages_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -1219,6 +1272,7 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
             corrupted_fields: 1,
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([ByteCountSnapshotEntry {
+                name: None,
                 key: MessageKey::build(
                     Some(123),
                     Some(123),
@@ -1227,7 +1281,8 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
                 ),
                 lines: 4,
                 bytes: 0,
-            }],)
+            }]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();
@@ -1237,6 +1292,7 @@ fn processes_unreadable_messages_then_aborts_on_wait_error() {
 fn pushes_multiple_entries_then_aborts_on_wait_error() {
     let logger_guard = setup_capture_logger();
     static T: TestState = TestState::init();
+    let _lease = T.init_filter();
 
     T.provider.watchdog_notify.enqueue_io(Ok(()));
     T.provider.open.enqueue_io(Ok(()));
@@ -1303,6 +1359,7 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
             metrics_requests: 0,
             messages_ingested: ByteCountSnapshot::build([
                 ByteCountSnapshotEntry {
+                    name: None,
                     key: MessageKey::build(
                         Some(123),
                         Some(456),
@@ -1313,6 +1370,7 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
                     bytes: 22,
                 },
                 ByteCountSnapshotEntry {
+                    name: None,
                     key: MessageKey::build(
                         Some(456),
                         Some(123),
@@ -1322,7 +1380,8 @@ fn pushes_multiple_entries_then_aborts_on_wait_error() {
                     lines: 1,
                     bytes: 11,
                 },
-            ])
+            ]),
+            monitor_hits: ByteCountSnapshot::empty(),
         },
     );
     T.provider.assert_no_calls_remaining();

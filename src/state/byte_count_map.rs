@@ -2,46 +2,6 @@ use crate::prelude::*;
 
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct ByteCountSnapshotEntry {
-    pub key: MessageKey,
-    pub lines: u64,
-    pub bytes: u64,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ByteCountSnapshot {
-    snapshot: Box<[ByteCountSnapshotEntry]>,
-}
-
-impl ByteCountSnapshot {
-    #[cfg(test)]
-    pub fn empty() -> Self {
-        Self {
-            snapshot: Box::new([]),
-        }
-    }
-
-    fn new(mut snapshot: Box<[ByteCountSnapshotEntry]>) -> Self {
-        // To ensure there's a defined order for a much easier time testing.
-        snapshot.sort_unstable_by(|a, b| a.key.cmp(&b.key));
-        Self { snapshot }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.snapshot.is_empty()
-    }
-
-    pub fn each_while(&self, receiver: impl FnMut(&ByteCountSnapshotEntry) -> bool) -> bool {
-        self.snapshot.iter().all(receiver)
-    }
-
-    #[cfg(test)]
-    pub fn build(data: impl IntoIterator<Item = ByteCountSnapshotEntry>) -> Self {
-        Self::new(Box::from_iter(data))
-    }
-}
-
 struct ByteCountData {
     lines: Counter,
     bytes: Counter,
@@ -77,9 +37,11 @@ impl ByteCountMap {
         let mut snapshot = Vec::new();
 
         if let Some(table) = &*self.table.read().unwrap_or_else(|e| e.into_inner()) {
+            snapshot.try_reserve_exact(table.len()).ok()?;
             for (key, value) in table {
                 snapshot.push(ByteCountSnapshotEntry {
-                    key: *key,
+                    name: None,
+                    key: key.clone(),
                     lines: value.lines.current(),
                     bytes: value.bytes.current(),
                 });
@@ -89,7 +51,8 @@ impl ByteCountMap {
         Some(ByteCountSnapshot::new(snapshot.into()))
     }
 
-    // Take a reference to avoid a copy.
+    // Take a reference to avoid a copy. This is *very* perf-sensitive, being called once per entry
+    // for the global counters and once per entry per matching monitor filter as well.
     pub fn push_line(&self, key: &MessageKey, msg_len: usize) -> bool {
         // Services are very rarely added. Try opening a read first and doing atomic updates, and
         // fall back to a write lock if the entry doesn't exist yet. Contention should already be
@@ -142,7 +105,7 @@ impl ByteCountMap {
             }
 
             target.insert(
-                *key,
+                key.clone(),
                 ByteCountData {
                     lines: Counter::new(1),
                     bytes: Counter::new(zero_extend_usize_u64(msg_len)),
@@ -158,7 +121,7 @@ impl ByteCountMap {
 mod tests {
     use super::*;
 
-    const fn map_key(s: &[u8]) -> MessageKey {
+    fn map_key(s: &[u8]) -> MessageKey {
         MessageKey::build(None, None, Some(s), Priority::Informational)
     }
 
@@ -169,25 +132,30 @@ mod tests {
     #[test]
     fn works_on_one_thread() {
         static S: PromState = PromState::new();
+        // SAFETY: It's held for the full test, and `S` is only accessible inside the test.
+        let _lease = unsafe { S.initialize_monitor_filter(None) };
 
-        S.add_message_line_ingested(&map_key(b"one"), 123);
-        S.add_message_line_ingested(&map_key(b"one"), 456);
-        S.add_message_line_ingested(&map_key(b"two"), 789);
-        S.add_message_line_ingested(&map_key(b"three"), 555);
-        S.add_message_line_ingested(&map_key(b"three"), 444);
+        S.add_message_line_ingested(&map_key(b"one"), &[0; 123]);
+        S.add_message_line_ingested(&map_key(b"one"), &[0; 456]);
+        S.add_message_line_ingested(&map_key(b"two"), &[0; 789]);
+        S.add_message_line_ingested(&map_key(b"three"), &[0; 555]);
+        S.add_message_line_ingested(&map_key(b"three"), &[0; 444]);
 
-        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &[
+        let expected_data = [
             ByteCountSnapshotEntry {
+                name: None,
                 key: map_key(b"one"),
                 lines: 2,
                 bytes: 579,
             },
             ByteCountSnapshotEntry {
+                name: None,
                 key: map_key(b"two"),
                 lines: 1,
                 bytes: 789,
             },
             ByteCountSnapshotEntry {
+                name: None,
                 key: map_key(b"three"),
                 lines: 2,
                 bytes: 999,
@@ -205,39 +173,41 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
+                messages_ingested: ByteCountSnapshot::build(expected_data),
+                monitor_hits: ByteCountSnapshot::empty(),
             }
         );
     }
 
-    const KEYS: [MessageKey; 16] = [
-        map_key(b"test_1"),
-        map_key(b"test_2"),
-        map_key(b"test_3"),
-        map_key(b"test_4"),
-        map_key(b"test_5"),
-        map_key(b"test_6"),
-        map_key(b"test_7"),
-        map_key(b"test_8"),
-        map_key(b"test_9"),
-        map_key(b"test_10"),
-        map_key(b"test_11"),
-        map_key(b"test_12"),
-        map_key(b"test_13"),
-        map_key(b"test_14"),
-        map_key(b"test_15"),
-        map_key(b"test_16"),
-    ];
-
     fn test_contends_inner(state: &PromState, contends_list: &[MessageKey; 10]) {
+        let keys = [
+            map_key(b"test_1"),
+            map_key(b"test_2"),
+            map_key(b"test_3"),
+            map_key(b"test_4"),
+            map_key(b"test_5"),
+            map_key(b"test_6"),
+            map_key(b"test_7"),
+            map_key(b"test_8"),
+            map_key(b"test_9"),
+            map_key(b"test_10"),
+            map_key(b"test_11"),
+            map_key(b"test_12"),
+            map_key(b"test_13"),
+            map_key(b"test_14"),
+            map_key(b"test_15"),
+            map_key(b"test_16"),
+        ];
+        let msg = [0; 10];
+
         let mut test_modulo = 9_usize;
         for i in 1..=100 {
-            for key in &KEYS {
-                state.add_message_line_ingested(key, 10);
+            for key in &keys {
+                state.add_message_line_ingested(key, &msg);
             }
             if i % 10 == test_modulo {
                 test_modulo = test_modulo.wrapping_sub(1);
-                state.add_message_line_ingested(&contends_list[i / 10], 1);
+                state.add_message_line_ingested(&contends_list[i / 10], &[1]);
             }
         }
     }
@@ -247,8 +217,10 @@ mod tests {
         // Pre-allocate everything so it won't take a long time to run with all the allocations.
         // This is one of the slowest tests in Miri, so it's particularly helpful here.
         static S: PromState = PromState::new();
+        // SAFETY: It's held for the full test, and `S` is only accessible inside the test.
+        let _lease = unsafe { S.initialize_monitor_filter(None) };
 
-        static CONTENDS_0: [MessageKey; 10] = [
+        let contends_0 = [
             map_key(b"contend_0_0"),
             map_key(b"contend_0_1"),
             map_key(b"contend_0_2"),
@@ -261,7 +233,7 @@ mod tests {
             map_key(b"contend_0_9"),
         ];
 
-        static CONTENDS_1: [MessageKey; 10] = [
+        let contends_1 = [
             map_key(b"contend_1_0"),
             map_key(b"contend_1_1"),
             map_key(b"contend_1_2"),
@@ -275,48 +247,48 @@ mod tests {
         ];
 
         #[rustfmt::skip]
-        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &[
-            ByteCountSnapshotEntry { key: map_key(b"test_1"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_2"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_3"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_4"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_5"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_6"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_7"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_8"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_9"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_10"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_11"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_12"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_13"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_14"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_15"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"test_16"), lines: 200, bytes: 2000 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_0"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_1"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_2"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_3"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_4"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_5"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_6"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_7"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_8"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_0_9"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_0"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_1"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_2"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_3"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_4"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_5"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_6"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_7"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_8"), lines: 1, bytes: 1 },
-            ByteCountSnapshotEntry { key: map_key(b"contend_1_9"), lines: 1, bytes: 1 },
+        let expected_data = [
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_1"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_2"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_3"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_4"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_5"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_6"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_7"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_8"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_9"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_10"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_11"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_12"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_13"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_14"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_15"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"test_16"), lines: 200, bytes: 2000 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_0"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_1"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_2"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_3"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_4"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_5"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_6"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_7"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_8"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_0_9"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_0"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_1"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_2"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_3"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_4"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_5"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_6"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_7"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_8"), lines: 1, bytes: 1 },
+            ByteCountSnapshotEntry { name: None, key: map_key(b"contend_1_9"), lines: 1, bytes: 1 },
         ];
 
         std::thread::scope(|s| {
-            s.spawn(move || test_contends_inner(&S, &CONTENDS_0));
-            s.spawn(move || test_contends_inner(&S, &CONTENDS_1));
+            s.spawn(move || test_contends_inner(&S, &contends_0));
+            s.spawn(move || test_contends_inner(&S, &contends_1));
         });
 
         assert_eq!(
@@ -330,7 +302,8 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
+                messages_ingested: ByteCountSnapshot::build(expected_data),
+                monitor_hits: ByteCountSnapshot::empty(),
             }
         );
     }
@@ -342,84 +315,64 @@ mod tests {
     fn works_on_a_hundred_contending_threads() {
         // Pre-allocate everything so it won't take a long time to run with all the allocations.
         static S: PromState = PromState::new();
+        // SAFETY: It's held for the full test, and `S` is only accessible inside the test.
+        let _lease = unsafe { S.initialize_monitor_filter(None) };
 
-        const CONTENDS_LISTS: [[MessageKey; 10]; 100] = {
-            let inner = [map_key(b"placeholder"); 10];
-            let mut result = [inner; 100];
-            let mut i = 0;
-            while i < 100 {
-                let mut j = 0;
-                let tens = b'0'.wrapping_add(i / 10);
-                let ones = b'0'.wrapping_add(i % 10);
-                let mut inner = inner;
-                while j < 10 {
-                    let last = b'0'.wrapping_add(j);
-                    let mut base = *b"contend_00_0";
-                    base[8] = tens;
-                    base[9] = ones;
-                    base[11] = last;
-                    inner[zero_extend_u8_usize(j)] = map_key(&base);
-                    j += 1;
-                }
-                result[zero_extend_u8_usize(i)] = inner;
-                i += 1;
-            }
-            result
-        };
-
-        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &{
-            let mut result = [ByteCountSnapshotEntry {
-                key: map_key(b"placeholder"),
-                lines: 1,
-                bytes: 1,
-            }; KEYS.len() + 1000];
+        let expected_data = std::thread::scope(|s| {
+            let mut expected_data = Vec::with_capacity(1016);
 
             // Don't format this bit. It'll just make this less readable.
             #[rustfmt::skip]
             #[allow(clippy::let_unit_value)]
             let _ = {
-                result[0] = ByteCountSnapshotEntry { key: map_key(b"test_1"), lines: 10_000, bytes: 100_000 };
-                result[1] = ByteCountSnapshotEntry { key: map_key(b"test_2"), lines: 10_000, bytes: 100_000 };
-                result[2] = ByteCountSnapshotEntry { key: map_key(b"test_3"), lines: 10_000, bytes: 100_000 };
-                result[3] = ByteCountSnapshotEntry { key: map_key(b"test_4"), lines: 10_000, bytes: 100_000 };
-                result[4] = ByteCountSnapshotEntry { key: map_key(b"test_5"), lines: 10_000, bytes: 100_000 };
-                result[5] = ByteCountSnapshotEntry { key: map_key(b"test_6"), lines: 10_000, bytes: 100_000 };
-                result[6] = ByteCountSnapshotEntry { key: map_key(b"test_7"), lines: 10_000, bytes: 100_000 };
-                result[7] = ByteCountSnapshotEntry { key: map_key(b"test_8"), lines: 10_000, bytes: 100_000 };
-                result[8] = ByteCountSnapshotEntry { key: map_key(b"test_9"), lines: 10_000, bytes: 100_000 };
-                result[9] = ByteCountSnapshotEntry { key: map_key(b"test_10"), lines: 10_000, bytes: 100_000 };
-                result[10] = ByteCountSnapshotEntry { key: map_key(b"test_11"), lines: 10_000, bytes: 100_000 };
-                result[11] = ByteCountSnapshotEntry { key: map_key(b"test_12"), lines: 10_000, bytes: 100_000 };
-                result[12] = ByteCountSnapshotEntry { key: map_key(b"test_13"), lines: 10_000, bytes: 100_000 };
-                result[13] = ByteCountSnapshotEntry { key: map_key(b"test_14"), lines: 10_000, bytes: 100_000 };
-                result[14] = ByteCountSnapshotEntry { key: map_key(b"test_15"), lines: 10_000, bytes: 100_000 };
-                result[15] = ByteCountSnapshotEntry { key: map_key(b"test_16"), lines: 10_000, bytes: 100_000 };
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_1"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_2"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_3"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_4"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_5"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_6"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_7"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_8"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_9"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_10"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_11"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_12"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_13"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_14"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_15"), lines: 10_000, bytes: 100_000 });
+                expected_data.push(ByteCountSnapshotEntry { name: None, key: map_key(b"test_16"), lines: 10_000, bytes: 100_000 });
             };
 
-            let mut target = 16;
-            let mut i = 0;
-            while i < CONTENDS_LISTS.len() {
-                let entry = &CONTENDS_LISTS[i];
-                let mut j = 0;
-                while j < entry.len() {
-                    result[target] = ByteCountSnapshotEntry {
-                        key: entry[j],
+            let mut template = *b"contend_00_0";
+
+            for i in 0..=99 {
+                let tens = b'0'.wrapping_add(i / 10);
+                let ones = b'0'.wrapping_add(i % 10);
+                template[8] = tens;
+                template[9] = ones;
+
+                fn gen_key(
+                    template: &mut [u8; 12],
+                    expected_data: &mut Vec<ByteCountSnapshotEntry>,
+                    id: usize,
+                ) -> MessageKey {
+                    template[11] = truncate_usize_u8(id).wrapping_add(b'0');
+                    let key = map_key(template);
+                    expected_data.push(ByteCountSnapshotEntry {
+                        name: None,
+                        key: key.clone(),
                         lines: 1,
                         bytes: 1,
-                    };
-                    j += 1;
-                    target += 1;
+                    });
+                    key
                 }
-                i += 1;
+
+                let list = std::array::from_fn(|i| gen_key(&mut template, &mut expected_data, i));
+
+                s.spawn(move || test_contends_inner(&S, &list));
             }
 
-            result
-        };
-
-        std::thread::scope(|s| {
-            for list in &CONTENDS_LISTS {
-                s.spawn(move || test_contends_inner(&S, list));
-            }
+            expected_data
         });
 
         assert_eq!(
@@ -433,7 +386,8 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
+                messages_ingested: ByteCountSnapshot::build(expected_data),
+                monitor_hits: ByteCountSnapshot::empty(),
             }
         );
     }

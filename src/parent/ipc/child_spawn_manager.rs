@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn manager_tracks_retries_on_spawn_error() {
         static S: StaticState = StaticState::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         let instant = Instant::now();
         S.enqueue_child_spawn(Err(libc::ENOENT));
@@ -165,7 +165,7 @@ mod tests {
     fn manager_allows_ready_from_start() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         S.enqueue_child_spawn(Ok((&CHILD_NOTIFY, EXIT_STATUS_TERMINATED.clone())));
 
@@ -180,7 +180,7 @@ mod tests {
     fn manager_allows_ready_from_1_spawn_error() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         let instant = Instant::now();
         S.enqueue_child_spawn(Err(libc::ENOENT));
@@ -204,7 +204,7 @@ mod tests {
     fn manager_allows_ready_from_2_spawn_errors() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         let instant = Instant::now();
         S.enqueue_child_spawn(Err(libc::ENOENT));
@@ -237,7 +237,7 @@ mod tests {
     fn manager_allows_ready_from_3_spawn_errors() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         let instant = Instant::now();
         S.enqueue_child_spawn(Err(libc::ENOENT));
@@ -278,7 +278,7 @@ mod tests {
     fn manager_allows_ready_from_4_spawn_errors() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         let instant = Instant::now();
         S.enqueue_child_spawn(Err(libc::ENOENT));
@@ -327,7 +327,7 @@ mod tests {
     fn manager_tracks_retries_on_5_spawn_errors_if_spaced_far_enough_apart() {
         static S: StaticState = StaticState::new();
         static CHILD_NOTIFY: ChildStateNotify = ChildStateNotify::new();
-        S.init_test_state();
+        let _lease = S.init_test_state();
 
         let instant = Instant::now();
         S.enqueue_child_spawn(Err(libc::ENOENT));

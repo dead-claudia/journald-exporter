@@ -3,8 +3,10 @@ use crate::prelude::*;
 use super::ipc::*;
 use super::journal::run_journal_loop;
 use super::key_watcher::run_watcher;
-use crate::cli::args::ParentArgs;
 use crate::cli::args::TLSOptions;
+use crate::cli::config::IdOrName;
+use crate::cli::config::MonitorFilterEntry;
+use crate::cli::config::ParentConfig;
 use crate::ffi::*;
 use crate::parent::key_watcher::KeyWatcherTarget;
 use const_str::cstr;
@@ -22,8 +24,21 @@ static NATIVE_JOURNALD_PROVIDER: OnceCell<NativeSystemdProvider> = OnceCell::new
 
 static IPC_STATE: ParentIpcState<NativeIpcMethods> = ParentIpcState::new(NativeIpcMethods::new());
 
-pub fn start_parent(args: ParentArgs) -> io::Result<ExitResult> {
-    let child_user_group = get_child_uid_gid()?;
+pub fn start_parent(args: ParentConfig) -> io::Result<ExitResult> {
+    let user_table = IPC_STATE.methods().get_user_group_table()?;
+    let child_user_group = get_child_uid_gid(&user_table)?;
+
+    let monitor_filter = match args.monitor_filter {
+        None => None,
+        Some(entries) => Some(resolve_monitor_filter(&user_table, entries)?),
+    };
+
+    // SAFETY: The lease is forgotten, so the risky `drop` bits will never execute.
+    unsafe {
+        #[allow(clippy::mem_forget)]
+        std::mem::forget(IPC_STATE.state().initialize_monitor_filter(monitor_filter));
+    }
+
     let provider = NativeSystemdProvider::open_provider()?;
 
     NATIVE_JOURNALD_PROVIDER.get_or_init(|| provider);
@@ -72,12 +87,54 @@ fn load_tls_config(tls: Option<TLSOptions>) -> io::Result<Option<TLSConfig>> {
     }
 }
 
-fn get_child_uid_gid() -> io::Result<UserGroup> {
-    IPC_STATE
-        .methods()
-        .get_user_group_table()?
+fn get_child_uid_gid(user_table: &UidGidTable) -> io::Result<UserGroup> {
+    user_table
         .lookup_user_group(b"journald-exporter", b"journald-exporter")
-        .ok_or_else(|| error!("Expected a `journald-exporter` user must be present."))
+        .ok_or_else(|| error!("A `journald-exporter` user must be present."))
+}
+
+fn resolve_monitor_filter(
+    user_table: &UidGidTable,
+    entries: Vec<MonitorFilterEntry>,
+) -> io::Result<MonitorFilter> {
+    fn check_id(
+        id_table: &IdTable,
+        id_kind: &str,
+        monitor_name: &str,
+        id: Option<IdOrName>,
+    ) -> io::Result<Option<Option<u32>>> {
+        match id {
+            None => Ok(None),
+            Some(IdOrName::Placeholder) => Ok(Some(None)),
+            Some(IdOrName::Id(id)) => {
+                if id_table.lookup_id(id).is_none() {
+                    log::warn!("In `[monitor.{monitor_name}]`: {id_kind} ID `{id}` doesn't seem to exist. Filter will remain live, but won't likely receive hits.");
+                }
+                Ok(Some(Some(id)))
+            }
+            Some(IdOrName::Name(name)) => match id_table.lookup_name(name.as_bytes()) {
+                Some(id) => Ok(Some(Some(id))),
+                None => Err(error!(
+                    "In `[monitor.{monitor_name}]`: {id_kind} `{name}` could not be resolved."
+                )),
+            },
+        }
+    }
+
+    let mut resolved = Vec::with_capacity(entries.len());
+
+    for entry in entries {
+        resolved.push(MonitorFilterResolved {
+            uid: check_id(&user_table.uids, "User", &entry.monitor_name, entry.user)?,
+            gid: check_id(&user_table.gids, "Group", &entry.monitor_name, entry.group)?,
+            monitor_name: entry.monitor_name,
+            priority: entry.priority,
+            service: entry.service,
+            message_pattern: entry.message_pattern,
+        })
+    }
+
+    Ok(MonitorFilter::new(&resolved))
 }
 
 // Here's the intent:

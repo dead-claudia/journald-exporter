@@ -15,6 +15,8 @@ Precedence for ordering, where `a < b` implies `a` comes before `b`:
 - Priority < UID < GID < service
 */
 
+// TODO: optimize the layout of `MessageKey`.
+
 #[cfg(test)]
 fn build_message_key_tuple(
     (priority, uid, gid, service): (Priority, Option<u32>, Option<u32>, ServiceRepr),
@@ -27,7 +29,7 @@ fn build_message_key_tuple(
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord, Hash)]
 pub struct MessageKey {
     pub priority: Priority,
     pub uid: Option<u32>,
@@ -43,7 +45,7 @@ impl Arbitrary for MessageKey {
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         Box::new(
-            (self.priority, self.uid, self.gid, self.service)
+            (self.priority, self.uid, self.gid, self.service.clone())
                 .shrink()
                 .map(build_message_key_tuple),
         )
@@ -56,12 +58,12 @@ impl MessageKey {
             priority: Priority::Emergency,
             uid: None,
             gid: None,
-            service: ServiceRepr::EMPTY,
+            service: ServiceRepr::empty(),
         }
     }
 
     #[cfg(test)]
-    pub const fn build(
+    pub fn build(
         uid: Option<u32>,
         gid: Option<u32>,
         service: Option<&[u8]>,
@@ -71,12 +73,7 @@ impl MessageKey {
             priority,
             uid,
             gid,
-            service: match ServiceRepr::new(service) {
-                Ok(service_repr) => service_repr,
-                Err(ServiceParseError::Empty) => panic!("Service name is empty."),
-                Err(ServiceParseError::TooLong) => panic!("Service name is too long."),
-                Err(ServiceParseError::Invalid) => panic!("Service name is invalid."),
-            },
+            service: ServiceRepr::new(service).unwrap(),
         }
     }
 
@@ -96,7 +93,7 @@ mod tests {
     // Test utilities
 
     fn s(s: &[u8]) -> Service {
-        Service::from_slice(s).unwrap()
+        Service::from_full_service(s).unwrap()
     }
 
     fn service_compare(a: Service, b: Service) -> std::cmp::Ordering {
@@ -112,38 +109,38 @@ mod tests {
         use std::cmp::Ordering;
 
         // Single-char vs single-char
-        assert_eq!(service_compare(s(b"a"), s(b"a")), Ordering::Equal);
-        assert_eq!(service_compare(s(b"a"), s(b"b")), Ordering::Less);
-        assert_eq!(service_compare(s(b"b"), s(b"a")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"b"), s(b"b")), Ordering::Equal);
+        assert_eq!(service_compare(s(b"a.a"), s(b"a.a")), Ordering::Equal);
+        assert_eq!(service_compare(s(b"a.a"), s(b"b.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"b.a"), s(b"a.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"b.a"), s(b"b.a")), Ordering::Equal);
 
         // Single-char vs multi-char
-        assert_eq!(service_compare(s(b"a"), s(b"aa")), Ordering::Less);
-        assert_eq!(service_compare(s(b"a"), s(b"ab")), Ordering::Less);
-        assert_eq!(service_compare(s(b"a"), s(b"ba")), Ordering::Less);
-        assert_eq!(service_compare(s(b"a"), s(b"bb")), Ordering::Less);
-        assert_eq!(service_compare(s(b"b"), s(b"aa")), Ordering::Less);
-        assert_eq!(service_compare(s(b"b"), s(b"ab")), Ordering::Less);
-        assert_eq!(service_compare(s(b"b"), s(b"ba")), Ordering::Less);
-        assert_eq!(service_compare(s(b"b"), s(b"bb")), Ordering::Less);
+        assert_eq!(service_compare(s(b"a.a"), s(b"aa.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"a.a"), s(b"ab.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"a.a"), s(b"ba.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"a.a"), s(b"bb.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"b.a"), s(b"aa.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"b.a"), s(b"ab.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"b.a"), s(b"ba.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"b.a"), s(b"bb.a")), Ordering::Less);
 
         // Multi-char, equal length
-        assert_eq!(service_compare(s(b"aa"), s(b"aa")), Ordering::Equal);
-        assert_eq!(service_compare(s(b"aa"), s(b"ab")), Ordering::Less);
-        assert_eq!(service_compare(s(b"aa"), s(b"ba")), Ordering::Less);
-        assert_eq!(service_compare(s(b"aa"), s(b"bb")), Ordering::Less);
-        assert_eq!(service_compare(s(b"ab"), s(b"aa")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"ab"), s(b"ab")), Ordering::Equal);
-        assert_eq!(service_compare(s(b"ab"), s(b"ba")), Ordering::Less);
-        assert_eq!(service_compare(s(b"ab"), s(b"bb")), Ordering::Less);
-        assert_eq!(service_compare(s(b"ba"), s(b"aa")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"ba"), s(b"ab")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"ba"), s(b"ba")), Ordering::Equal);
-        assert_eq!(service_compare(s(b"ba"), s(b"bb")), Ordering::Less);
-        assert_eq!(service_compare(s(b"bb"), s(b"aa")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"bb"), s(b"ab")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"bb"), s(b"ba")), Ordering::Greater);
-        assert_eq!(service_compare(s(b"bb"), s(b"bb")), Ordering::Equal);
+        assert_eq!(service_compare(s(b"aa.a"), s(b"aa.a")), Ordering::Equal);
+        assert_eq!(service_compare(s(b"aa.a"), s(b"ab.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"aa.a"), s(b"ba.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"aa.a"), s(b"bb.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"ab.a"), s(b"aa.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"ab.a"), s(b"ab.a")), Ordering::Equal);
+        assert_eq!(service_compare(s(b"ab.a"), s(b"ba.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"ab.a"), s(b"bb.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"ba.a"), s(b"aa.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"ba.a"), s(b"ab.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"ba.a"), s(b"ba.a")), Ordering::Equal);
+        assert_eq!(service_compare(s(b"ba.a"), s(b"bb.a")), Ordering::Less);
+        assert_eq!(service_compare(s(b"bb.a"), s(b"aa.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"bb.a"), s(b"ab.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"bb.a"), s(b"ba.a")), Ordering::Greater);
+        assert_eq!(service_compare(s(b"bb.a"), s(b"bb.a")), Ordering::Equal);
     }
 
     // Basic functionality
@@ -353,7 +350,7 @@ mod tests {
         let mut key2 = MessageKey::new();
         key1.gid = Some(0);
         key2.gid = Some(u32::MAX);
-        key2.set_service(s(b"-"));
+        key2.set_service(s(b"-.-"));
         assert!(key1 < key2, "{key1:?} < {key2:?}");
     }
 
@@ -362,7 +359,7 @@ mod tests {
         let mut key1 = MessageKey::new();
         let mut key2 = MessageKey::new();
         key1.gid = Some(0);
-        key1.set_service(s(b"-"));
+        key1.set_service(s(b"-.-"));
         key2.gid = Some(u32::MAX);
         assert!(key1 < key2, "{key1:?} < {key2:?}");
     }

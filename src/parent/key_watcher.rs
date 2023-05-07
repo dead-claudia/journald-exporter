@@ -488,7 +488,8 @@ mod tests {
             }));
 
             let watcher_guard = self.static_state.state.terminate_notify().create_guard();
-            self.static_state
+            let _lease = self
+                .static_state
                 .init_test_state_with_key_dir(key_dir.path().to_owned());
             self.start_checkpoint.resume();
             if !self.resume_checkpoint.try_wait() {

@@ -14,6 +14,7 @@ pub struct PromSnapshot {
     pub corrupted_fields: u64,
     pub metrics_requests: u64,
     pub messages_ingested: ByteCountSnapshot,
+    pub monitor_hits: ByteCountSnapshot,
 }
 
 // Max integer: 18446744073709551616
@@ -214,37 +215,53 @@ impl Writer {
                 let user_name = data_bytes_from_id(&table.uids, &data.key.uid);
                 let group_name = data_bytes_from_id(&table.gids, &data.key.gid);
 
-                write_slices(
-                    &mut self.result,
-                    &[
-                        // *_created key
-                        constants.created_prefix,
-                        service_bytes,
-                        b"\",priority=\"",
-                        priority_name,
-                        b"\",severity=\"",
-                        &priority_severity,
-                        b"\",user=\"",
-                        user_name,
-                        b"\",group=\"",
-                        group_name,
-                        b"\"} ",
-                        environment.created_bytes(),
-                        // *_total key
-                        constants.total_prefix,
-                        service_bytes,
-                        b"\",priority=\"",
-                        priority_name,
-                        b"\",severity=\"",
-                        &priority_severity,
-                        b"\",user=\"",
-                        user_name,
-                        b"\",group=\"",
-                        group_name,
-                        b"\"} ",
-                        &self.value_buffer[head..],
-                    ],
-                )
+                let mut slice_data = [
+                    // *_created key
+                    constants.created_prefix,
+                    service_bytes,
+                    b"\",priority=\"",
+                    priority_name,
+                    b"\",severity=\"",
+                    &priority_severity,
+                    b"\",user=\"",
+                    user_name,
+                    b"\",group=\"",
+                    group_name,
+                    b"\"} ",
+                    environment.created_bytes(),
+                    // *_total key
+                    constants.total_prefix,
+                    service_bytes,
+                    b"\",priority=\"",
+                    priority_name,
+                    b"\",severity=\"",
+                    &priority_severity,
+                    b"\",user=\"",
+                    user_name,
+                    b"\",group=\"",
+                    group_name,
+                    b"\"} ",
+                    &self.value_buffer[head..],
+                    b"",
+                    b"",
+                    b"",
+                    b"",
+                ];
+                let mut len = slice_data.len().wrapping_sub(4);
+
+                if let Some(name) = &data.name {
+                    let name_label = b"\",name=\"";
+                    let name_value = name.as_bytes();
+                    len = slice_data.len();
+                    slice_data.copy_within(22..24, 26);
+                    slice_data.copy_within(10..22, 12);
+                    slice_data[10] = name_label;
+                    slice_data[11] = name_value;
+                    slice_data[24] = name_label;
+                    slice_data[25] = name_value;
+                }
+
+                write_slices(&mut self.result, &slice_data[..len])
             })
         }
     }
@@ -327,7 +344,7 @@ pub fn render_openapi_metrics(
     }
 
     macro_rules! write_message_counter {
-        (kind:$kind:ident, key:$key:ident, $(unit:$unit:expr,)? help:$help:expr $(,)?) => {{
+        (kind:$kind:ident, source:$source:ident, key:$key:ident, $(unit:$unit:expr,)? help:$help:expr $(,)?) => {{
             const HEADER: &[u8] = counter_header! {
                 key:$key,
                 $(unit:$unit,)?
@@ -344,7 +361,7 @@ pub fn render_openapi_metrics(
                 created_prefix: concat_bytes!("\n", NAME, "_created{service=\""),
                 total_prefix: concat_bytes!("\n", NAME, "_total{service=\""),
             };
-            if !writer.write_message_counters(&CONSTANTS, environment, &snapshot.messages_ingested, table) {
+            if !writer.write_message_counters(&CONSTANTS, environment, &snapshot.$source, table) {
                 return None;
             }
         }};
@@ -400,14 +417,29 @@ pub fn render_openapi_metrics(
     // Per-service counters
     write_message_counter! {
         kind: Lines,
+        source: messages_ingested,
         key: messages_ingested,
         help: b"Number of message entries successfully processed.",
     }
     write_message_counter! {
         kind: Bytes,
+        source: messages_ingested,
         key: messages_ingested_bytes,
         unit: bytes,
         help: b"Total number of `MESSAGE` field bytes ingested.",
+    }
+    write_message_counter! {
+        kind: Lines,
+        source: monitor_hits,
+        key: monitor_hits,
+        help: b"Number of hits corresponding to a specified monitor, denoted by its `name` attribute.",
+    }
+    write_message_counter! {
+        kind: Bytes,
+        source: monitor_hits,
+        key: monitor_hits_bytes,
+        unit: bytes,
+        help: b"Number of bytes across all hits corresponding to a specified monitor, denoted by its `name` attribute.",
     }
 
     if !write_slices(&mut writer.result, &[b"\n# EOF\n"]) {

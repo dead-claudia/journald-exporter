@@ -102,6 +102,32 @@ pub struct UserGroup {
     pub gid: u32,
 }
 
+pub enum NameOrPlaceholderResult {
+    Invalid,
+    ValidName,
+    ValidPlaceholder,
+}
+
+pub fn validate_name_or_placeholder(name: &[u8]) -> NameOrPlaceholderResult {
+    match name {
+        [b'?'] => NameOrPlaceholderResult::ValidPlaceholder,
+        [b'_' | b'A'..=b'Z' | b'a'..=b'z', rest @ ..] if name.len() <= MAX_NAME_LEN => {
+            let mut current = rest;
+            loop {
+                match current {
+                    [] => return NameOrPlaceholderResult::ValidName,
+                    [b'$'] => return NameOrPlaceholderResult::ValidName,
+                    [b'0'..=b'9' | b'_' | b'-' | b'A'..=b'Z' | b'a'..=b'z', rest @ ..] => {
+                        current = rest;
+                    }
+                    _ => return NameOrPlaceholderResult::Invalid,
+                }
+            }
+        }
+        _ => NameOrPlaceholderResult::Invalid,
+    }
+}
+
 /*
 This is a very simple `/etc/passwd` and `/etc/group` parser that just parses out what I need.
 Note: this also leverages the fact the first 3 groups are identical:

@@ -7,6 +7,7 @@ use super::args::Args;
 use super::args::ParentArgs;
 use super::config::parse_config;
 use super::config::ConfigError;
+use super::config::ParentConfig;
 use crate::child::start_child;
 use crate::cli::args::parse_args;
 use crate::ffi::normalize_errno;
@@ -85,7 +86,7 @@ fn check_config(config: PathBuf) -> io::Result<ExitResult> {
     Ok(ExitResult::Code(ExitCode(0)))
 }
 
-fn load_config(config: PathBuf) -> io::Result<ParentArgs> {
+fn load_config(config: PathBuf) -> io::Result<ParentConfig> {
     let data = std::fs::read(&config)?;
 
     let e = match parse_config(&data) {
@@ -102,7 +103,7 @@ fn load_config(config: PathBuf) -> io::Result<ParentArgs> {
         ConfigError::InvalidUTF8(e) => eprintln(format_cow(format_args!("{e}"))),
         ConfigError::InvalidSyntax(e) => eprintln(format_cow(format_args!("{e}"))),
         ConfigError::InvalidFields(errors) => {
-            for e in errors {
+            for e in errors.iter() {
                 eprintln(e.as_str());
             }
         }
@@ -118,5 +119,5 @@ fn start_parent_using_config(config: PathBuf) -> io::Result<ExitResult> {
 
 fn start_parent_using_flags(args: ParentArgs) -> io::Result<ExitResult> {
     crate::ffi::check_parent_uid_gid()?;
-    start_parent(args)
+    start_parent(ParentConfig::from_args(args))
 }

@@ -144,7 +144,7 @@ impl<M: ParentIpcMethods> MessageReader<M> {
         // things that write logs to syslog directly rather than through systemd's mechanisms. It
         // also includes cases like corrupted service names, which are easier to just tolerate.
         if let Some(name) = result {
-            match Service::from_slice(name) {
+            match Service::from_full_service(name) {
                 Ok(service) => {
                     self.key.set_service(service);
                 }
@@ -210,16 +210,13 @@ impl<M: ParentIpcMethods> MessageReader<M> {
             && self.try_read_uid(j)?
             && self.try_read_gid(j)?
         {
-            // Fall back to a "message length" of 0 if missing.
-            let msg_len = self.inner.get_data(j, MESSAGE)?.map_or(0, |msg| msg.len());
-
-            // No need to check. It'll get checked after this function returns anyways, and the
-            // below step is fairly trivial.
+            // Fall back to an empty "message" if missing.
+            let msg = self.inner.get_data(j, MESSAGE)?.unwrap_or(b"");
 
             self.inner
                 .state
                 .state()
-                .add_message_line_ingested(&self.key, msg_len);
+                .add_message_line_ingested(&self.key, msg);
         }
 
         Ok(())

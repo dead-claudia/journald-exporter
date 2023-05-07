@@ -13,6 +13,22 @@ pub struct PromState {
     corrupted_fields: Counter,
     metrics_requests: Counter,
     messages_ingested: ByteCountMap,
+    monitor_hits: OnceCell<Option<MonitorFilter>>,
+}
+
+pub struct MonitorFilterLease<'a>(&'a PromState);
+
+impl Drop for MonitorFilterLease<'_> {
+    fn drop(&mut self) {
+        if self.0.monitor_hits.get().is_some() {
+            // SAFETY: This is safe provided all the requirements are met with
+            // `initialize_monitor_filter`.
+            unsafe {
+                let ptr: *const OnceCell<_> = &self.0.monitor_hits;
+                ptr.cast_mut().as_mut().unwrap().take();
+            }
+        }
+    }
 }
 
 impl PromState {
@@ -27,7 +43,20 @@ impl PromState {
             corrupted_fields: Counter::new(0),
             metrics_requests: Counter::new(0),
             messages_ingested: ByteCountMap::new(),
+            monitor_hits: OnceCell::new(),
         }
+    }
+
+    /// SAFETY: Make sure to always keep the handle alive for the duration of the state's usage.
+    #[must_use]
+    pub unsafe fn initialize_monitor_filter(
+        &self,
+        filter: Option<MonitorFilter>,
+    ) -> MonitorFilterLease {
+        if self.monitor_hits.set(filter).is_err() {
+            std::panic::panic_any("Filter already initialized");
+        }
+        MonitorFilterLease(self)
     }
 
     #[cold]
@@ -65,9 +94,13 @@ impl PromState {
             .increment_by(zero_extend_usize_u64(requests));
     }
 
-    pub fn add_message_line_ingested(&self, key: &MessageKey, msg_len: usize) {
-        if !self.messages_ingested.push_line(key, msg_len) {
+    pub fn add_message_line_ingested(&self, key: &MessageKey, msg: &[u8]) {
+        if !self.messages_ingested.push_line(key, msg.len()) {
             self.add_fault();
+        }
+
+        if let Some(Some(filter)) = self.monitor_hits.get() {
+            filter.try_hit(key, msg, &self.faults);
         }
     }
 
@@ -82,6 +115,11 @@ impl PromState {
             corrupted_fields: self.corrupted_fields.current(),
             metrics_requests: self.metrics_requests.current(),
             messages_ingested: self.messages_ingested.snapshot()?,
+            monitor_hits: match self.monitor_hits.get() {
+                None => std::panic::panic_any("Monitor filter not initialized."),
+                Some(None) => ByteCountSnapshot::empty(),
+                Some(Some(hits)) => hits.snapshot()?,
+            },
         })
     }
 }
