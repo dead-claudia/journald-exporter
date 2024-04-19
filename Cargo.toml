@@ -15,7 +15,7 @@ tiny_http = { version = "0.12.0", features = ["ssl-rustls"] }
 const-str = { version = "0.5.4", features = ["std"] }
 heapless = "0.7.16"
 impls = "1.0.3"
-rustls = "0.21.1"
+rustls = "0.21.11"
 base64 = "0.21.0"
 once_cell = "1.17.1"
 
