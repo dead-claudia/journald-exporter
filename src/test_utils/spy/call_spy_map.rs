@@ -1,22 +1,20 @@
 use crate::prelude::*;
 
-use std::collections::hash_map;
-use std::collections::HashMap;
 use std::collections::VecDeque;
-use std::hash::Hash;
 
 #[derive(Debug)]
 struct SpyState<I, O> {
+    key: K,
     args: Vec<I>,
     results: VecDeque<O>,
 }
 
 pub struct CallSpyMap<K, I, O> {
-    states: Mutex<Option<HashMap<K, SpyState<I, O>>>>,
+    states: Mutex<Vec<SpyState<K, I, O>>>,
     name: &'static str,
 }
 
-impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
+impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
     pub const fn new(name: &'static str) -> Self {
         Self {
             states: Mutex::new(None),
@@ -27,15 +25,18 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
     pub fn enqueue(&self, key: K, result: O) {
         let mut guard = self.states.lock().unwrap_or_else(|e| e.into_inner());
 
-        let state = match guard.get_or_insert_with(HashMap::new).entry(key) {
-            hash_map::Entry::Occupied(o) => o.into_mut(),
-            hash_map::Entry::Vacant(v) => v.insert(SpyState {
-                args: Vec::new(),
-                results: VecDeque::new(),
-            }),
-        };
+        for state in guard.iter_mut() {
+            if state.key == key {
+                state.results.push_back(result);
+                return;
+            }
+        }
 
-        state.results.push_back(result);
+        guard.push(SpyState {
+            key,
+            args: Vec::new(),
+            results: VecDeque::from([result]),
+        });
     }
 
     #[must_use]
@@ -44,8 +45,9 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
         K: fmt::Debug,
     {
         let mut guard = self.states.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(map) = &mut *guard {
-            if let Some(state) = map.get_mut(&key) {
+
+        for state in guard.iter_mut() {
+            if state.key == key {
                 if let Some(result) = state.results.pop_front() {
                     state.args.push(args);
                     return result;
@@ -63,19 +65,25 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
         I: fmt::Debug,
         O: fmt::Debug,
     {
-        let mut results = HashMap::new();
+        use std::fmt::Write;
+
+        let mut results = String::new();
+        let mut prefix = "";
 
         let guard = self.states.lock().unwrap_or_else(|e| e.into_inner());
-        for (key, state) in guard.iter().flatten() {
+
+        for (key, state) in guard.iter() {
             if !state.results.is_empty() {
-                results.insert(key, &state.results);
+                write!(&mut result, "{}{:?} => {:?}", prefix, key, &state.results)
+                    .unwrap();
+                prefix = ", ";
             }
         }
 
-        if !results.is_empty() {
+        if !result.is_empty() {
             panic!(
-                "Unexpected calls remaining for `{}`: {:?}",
-                self.name, results
+                "Unexpected calls remaining for `{}`: {{{}}}",
+                self.name, result
             );
         }
     }
@@ -87,14 +95,16 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
         I: fmt::Debug + PartialEq,
         K: fmt::Debug,
     {
-        let mut expected_map: HashMap<&K, Vec<&I>> = HashMap::new();
+        let mut expected_map = Vec::<(&K, Vec<&I>)>::new();
 
-        for (key, value) in expected {
-            let vec = match expected_map.entry(key) {
-                hash_map::Entry::Occupied(o) => o.into_mut(),
-                hash_map::Entry::Vacant(v) => v.insert(Vec::new()),
-            };
-            vec.push(value);
+        'outer: for (key, value) in expected {
+            for (k, v) of expected_map.iter_mut() {
+                if k == key {
+                    v.push(value);
+                    continue 'outer;
+                }
+            }
+            expected_map.push((key, vec![value]));
         }
 
         fn args_equal<I: PartialEq>(expected: Option<&[&I]>, actual: &[I]) -> bool {
@@ -114,9 +124,9 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
             }
         }
 
-        fn states_equal<K: Eq + Hash, I: PartialEq, O>(
-            expected_map: &HashMap<&K, Vec<&I>>,
-            states: &Option<HashMap<K, SpyState<I, O>>>,
+        fn states_equal<K: PartialEq, I: PartialEq, O>(
+            expected_map: &[(&K, Vec<&I>)],
+            states: &[SpyState<K, I, O>],
         ) -> bool {
             let Some(states) = states.as_ref() else {
                 return expected_map.is_empty();
@@ -126,20 +136,18 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
                 return false;
             }
 
-            for (key, state) in states.iter() {
-                let Some(expected) = expected_map.get(key) else {
-                    return false;
-                };
+            'outer: for state in states {
+                for (key, expected) in expected_map {
+                    if key == states.key {
+                        if !state.args.iter().eq(expected) {
+                            return false;
+                        }
 
-                if expected.len() != state.args.len() {
-                    return false;
-                }
-
-                for (a, b) in expected.iter().zip(state.args.iter()) {
-                    if a != &b {
-                        return false;
+                        continue 'outer;
                     }
                 }
+
+                return false;
             }
 
             true
@@ -148,12 +156,22 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
         let states = self.states.lock().unwrap_or_else(|e| e.into_inner());
 
         if !states_equal(&expected_map, &states) {
-            struct ActualStates<'a, K, I, O>(&'a Option<HashMap<K, SpyState<I, O>>>);
+            struct ExpectedStates<'a, K, I>(&'a [(&K, Vec<&I>)]);
 
-            impl<K: Eq + Hash + fmt::Debug, I: fmt::Debug, O> fmt::Debug for ActualStates<'_, K, I, O> {
+            impl<K: PartialEq + fmt::Debug, I: fmt::Debug> fmt::Debug for ExpectedStates<'_, K, I> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_map()
-                        .entries(self.0.iter().flatten().map(|(k, v)| (k, &v.args)))
+                        .entries(self.0.iter().map(|s| (&s.0, &s.1)))
+                        .finish()
+                }
+            }
+
+            struct ActualStates<'a, K, I, O>(&'a [SpyState<K, I, O>]);
+
+            impl<K: PartialEq + fmt::Debug, I: fmt::Debug, O> fmt::Debug for ActualStates<'_, K, I, O> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.debug_map()
+                        .entries(self.0.iter().map(|s| (&s.key, &s.args)))
                         .finish()
                 }
             }
@@ -161,14 +179,14 @@ impl<K: Eq + Hash, I, O> CallSpyMap<K, I, O> {
             panic!(
                 "Calls for `{}` do not match.\nExpected: {:?}\n  Actual: {:?}",
                 self.name,
-                expected_map,
+                ExpectedStates(&expected_map),
                 ActualStates(&*states)
             )
         }
     }
 }
 
-impl<K: Eq + Hash, I, O> CallSpyMap<K, I, io::Result<O>> {
+impl<K: PartialEq, I, O> CallSpyMap<K, I, io::Result<O>> {
     pub fn enqueue_io(&self, key: K, result: Result<O, libc::c_int>) {
         self.enqueue(key, result.map_err(Error::from_raw_os_error));
     }
