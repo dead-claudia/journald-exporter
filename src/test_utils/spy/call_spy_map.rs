@@ -74,12 +74,15 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
 
         for state in guard.iter() {
             if !state.results.is_empty() {
-                write!(&mut fail_pairs, "{}{:?} => {:?}", prefix, &state.key, &state.results)
-                    .unwrap();
+                write!(
+                    &mut fail_pairs,
+                    "{}{:?} => {:?}",
+                    prefix, &state.key, &state.results,
+                ).unwrap();
                 prefix = ", ";
             }
         }
-        
+
         drop(guard); // don't poison
 
         if !fail_pairs.is_empty() {
