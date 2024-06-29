@@ -72,9 +72,9 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
 
         let guard = self.states.lock().unwrap_or_else(|e| e.into_inner());
 
-        for (key, state) in guard.iter() {
+        for state in guard.iter() {
             if !state.results.is_empty() {
-                write!(&mut fail_pairs, "{}{:?} => {:?}", prefix, key, &state.results)
+                write!(&mut fail_pairs, "{}{:?} => {:?}", prefix, &state.key, &state.results)
                     .unwrap();
                 prefix = ", ";
             }
@@ -82,7 +82,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
         
         drop(guard); // don't poison
 
-        if !result.is_empty() {
+        if !fail_pairs.is_empty() {
             panic!(
                 "Unexpected calls remaining for `{}`: {{{}}}",
                 self.name, fail_pairs
@@ -101,7 +101,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
 
         'outer: for (key, value) in expected.iter() {
             for (k, v) in expected_map.iter_mut() {
-                if k == key {
+                if *k == key {
                     v.push(value);
                     continue 'outer;
                 }
@@ -136,8 +136,8 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
 
             'outer: for state in states {
                 for (key, expected) in expected_map {
-                    if key == states.key {
-                        if !state.args.iter().eq(expected) {
+                    if key == state.key {
+                        if !state.args.iter().eq(&expected) {
                             return false;
                         }
 
