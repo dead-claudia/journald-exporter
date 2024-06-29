@@ -159,7 +159,6 @@ mod tests {
     use crate::ffi::syscall_utils::sd_check;
     use crate::ffi::NativeSystemdProvider;
     use crate::ffi::SystemdProvider;
-    use std::collections::HashMap;
     use std::ffi::CString;
 
     struct LazyProvider {
