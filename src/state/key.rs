@@ -27,9 +27,7 @@ impl fmt::Debug for Key {
 
 fn is_valid_hex_string(bytes: &[u8]) -> bool {
     matches!(bytes.len(), len @ 1..=MAX_KEY_LEN if len % 2 == 0)
-        && bytes
-            .iter()
-            .all(|b| b.is_ascii_hexdigit())
+        && bytes.iter().all(|b| b.is_ascii_hexdigit())
 }
 
 fn normalize_hex(byte: u8) -> u8 {
