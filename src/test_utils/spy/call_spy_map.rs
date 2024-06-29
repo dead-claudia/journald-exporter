@@ -120,7 +120,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
             'outer: for state in states {
                 for (key, expected) in expected_map {
                     if *key == &state.key {
-                        if !state.args.iter().eq(expected.iter().as_deref()) {
+                        if !state.args.iter().eq_by(expected, |a, b| a == *b) {
                             return false;
                         }
 
