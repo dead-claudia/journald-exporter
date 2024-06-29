@@ -8,7 +8,6 @@ use std::process::Stdio;
 use std::time::SystemTime;
 
 // Don't leak the process in case of spawn error.
-struct KillChildOnDrop<'a>(Option<&'a mut std::process::Child>);
 
 #[cold]
 fn panic_if_real_error(e: Error) {
@@ -24,14 +23,6 @@ fn terminate_raw_child(child: &mut std::process::Child) {
 
     if let Err(e) = child.wait() {
         panic_if_real_error(e);
-    }
-}
-
-impl Drop for KillChildOnDrop<'_> {
-    fn drop(&mut self) {
-        if let Some(child) = self.0.take() {
-            terminate_raw_child(child)
-        }
     }
 }
 

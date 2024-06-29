@@ -26,6 +26,8 @@
 #![cfg_attr(not(test), deny(clippy::use_debug))]
 // Panicking in tests is okay.
 #![cfg_attr(not(test), deny(clippy::arithmetic_side_effects))]
+// Type checking is good enough for me.
+#![allow(clippy::missing_transmute_annotations)]
 
 // Now for all the module specifications
 
