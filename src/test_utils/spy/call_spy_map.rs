@@ -67,23 +67,25 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
     {
         use std::fmt::Write;
 
-        let mut results = String::new();
+        let mut fail_pairs = String::new();
         let mut prefix = "";
 
         let guard = self.states.lock().unwrap_or_else(|e| e.into_inner());
 
         for (key, state) in guard.iter() {
             if !state.results.is_empty() {
-                write!(&mut result, "{}{:?} => {:?}", prefix, key, &state.results)
+                write!(&mut fail_pairs, "{}{:?} => {:?}", prefix, key, &state.results)
                     .unwrap();
                 prefix = ", ";
             }
         }
+        
+        drop(guard); // don't poison
 
         if !result.is_empty() {
             panic!(
                 "Unexpected calls remaining for `{}`: {{{}}}",
-                self.name, result
+                self.name, fail_pairs
             );
         }
     }
@@ -98,7 +100,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
         let mut expected_map = Vec::<(&K, Vec<&I>)>::new();
 
         'outer: for (key, value) in expected.iter() {
-            for (k, v) of expected_map.iter_mut() {
+            for (k, v) in expected_map.iter_mut() {
                 if k == key {
                     v.push(value);
                     continue 'outer;
@@ -156,7 +158,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
         let states = self.states.lock().unwrap_or_else(|e| e.into_inner());
 
         if !states_equal(&expected_map, &states) {
-            struct ExpectedStates<'a, K, I>(&'a [(&K, Vec<&I>)]);
+            struct ExpectedStates<'a, K, I>(&'a [(&'a K, Vec<&'a I>)]);
 
             impl<K: PartialEq + fmt::Debug, I: fmt::Debug> fmt::Debug for ExpectedStates<'_, K, I> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
