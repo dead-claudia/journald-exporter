@@ -321,7 +321,7 @@ mod tests {
                     "journald-exporter native_journal_ref_finds_new_journal_entries 1".into(),
                     "journald-exporter native_journal_ref_finds_new_journal_entries 2".into(),
                     "journald-exporter native_journal_ref_finds_new_journal_entries 3".into(),
-                ])),
+                ]),
             );
 
             result.map(|r| r.0)
