@@ -78,7 +78,8 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
                     &mut fail_pairs,
                     "{}{:?} => {:?}",
                     prefix, &state.key, &state.results,
-                ).unwrap();
+                )
+                .unwrap();
                 prefix = ", ";
             }
         }
