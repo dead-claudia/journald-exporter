@@ -76,7 +76,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
             if !state.results.is_empty() {
                 write!(
                     &mut fail_pairs,
-                    "{}{:?} => {:?}",
+                    "{}{:?}: {:?}",
                     prefix, &state.key, &state.results,
                 )
                 .unwrap();
