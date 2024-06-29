@@ -29,7 +29,7 @@ fn is_valid_hex_string(bytes: &[u8]) -> bool {
     matches!(bytes.len(), len @ 1..=MAX_KEY_LEN if len % 2 == 0)
         && bytes
             .iter()
-            .all(|b| matches!(b, b'0'..=b'9' | b'A'..=b'F' | b'a'..=b'f'))
+            .all(|b| b.is_hex_digit())
 }
 
 fn normalize_hex(byte: u8) -> u8 {
