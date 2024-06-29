@@ -109,23 +109,6 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
             expected_map.push((key, vec![value]));
         }
 
-        fn args_equal<I: PartialEq>(expected: Option<&[&I]>, actual: &[I]) -> bool {
-            match expected {
-                Some(expected) => {
-                    let mut expected = expected.iter();
-                    let mut actual = actual.iter();
-                    loop {
-                        match (expected.next(), actual.next()) {
-                            (None, None) => break true,
-                            (Some(&a), Some(b)) if a == b => {}
-                            (_, _) => break false,
-                        }
-                    }
-                }
-                _ => false,
-            }
-        }
-
         fn states_equal<K: PartialEq, I: PartialEq, O>(
             expected_map: &[(&K, Vec<&I>)],
             states: &[SpyState<K, I, O>],
@@ -137,7 +120,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
             'outer: for state in states {
                 for (key, expected) in expected_map {
                     if *key == &state.key {
-                        if !state.args.iter().eq(&expected[..]) {
+                        if !state.args.iter().eq(expected.iter().as_deref()) {
                             return false;
                         }
 
