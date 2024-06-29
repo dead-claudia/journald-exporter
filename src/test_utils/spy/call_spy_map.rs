@@ -3,7 +3,7 @@ use crate::prelude::*;
 use std::collections::VecDeque;
 
 #[derive(Debug)]
-struct SpyState<I, O> {
+struct SpyState<K, I, O> {
     key: K,
     args: Vec<I>,
     results: VecDeque<O>,
@@ -97,7 +97,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
     {
         let mut expected_map = Vec::<(&K, Vec<&I>)>::new();
 
-        'outer: for (key, value) in expected {
+        'outer: for (key, value) in expected.iter() {
             for (k, v) of expected_map.iter_mut() {
                 if k == key {
                     v.push(value);
