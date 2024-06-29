@@ -161,7 +161,7 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
                 "Calls for `{}` do not match.\nExpected: {:?}\n  Actual: {:?}",
                 self.name,
                 ExpectedStates(&expected_map),
-                ActualStates(&*states)
+                ActualStates(&states)
             )
         }
     }
