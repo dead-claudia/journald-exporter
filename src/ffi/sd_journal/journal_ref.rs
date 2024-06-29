@@ -310,10 +310,7 @@ mod tests {
 
                     break 'read Some((
                         journal.cursor().unwrap(),
-                        HashMap::<_, _>::from_iter([
-                            ("TEST_LABEL_ONE", test_label_1),
-                            ("TEST_LABEL_TWO", test_label_2),
-                            ("TEST_LABEL_THREE", test_label_3),
+                        [test_label_1, test_label_2, test_label_3],
                         ]),
                     ));
                 }
@@ -321,19 +318,10 @@ mod tests {
 
             assert_eq!(
                 result.as_ref().map(|r| &r.1),
-                Some(&HashMap::from_iter([
-                    (
-                        "TEST_LABEL_ONE",
-                        "journald-exporter native_journal_ref_finds_new_journal_entries 1".into(),
-                    ),
-                    (
-                        "TEST_LABEL_TWO",
-                        "journald-exporter native_journal_ref_finds_new_journal_entries 2".into(),
-                    ),
-                    (
-                        "TEST_LABEL_THREE",
-                        "journald-exporter native_journal_ref_finds_new_journal_entries 3".into(),
-                    ),
+                Some(&[
+                    "journald-exporter native_journal_ref_finds_new_journal_entries 1".into(),
+                    "journald-exporter native_journal_ref_finds_new_journal_entries 2".into(),
+                    "journald-exporter native_journal_ref_finds_new_journal_entries 3".into(),
                 ])),
             );
 
