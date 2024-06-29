@@ -17,7 +17,7 @@ pub struct CallSpyMap<K, I, O> {
 impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
     pub const fn new(name: &'static str) -> Self {
         Self {
-            states: Mutex::new(None),
+            states: Mutex::new(Vec::new()),
             name,
         }
     }
@@ -130,10 +130,6 @@ impl<K: PartialEq, I, O> CallSpyMap<K, I, O> {
             expected_map: &[(&K, Vec<&I>)],
             states: &[SpyState<K, I, O>],
         ) -> bool {
-            let Some(states) = states.as_ref() else {
-                return expected_map.is_empty();
-            };
-
             if expected_map.len() != states.len() {
                 return false;
             }
