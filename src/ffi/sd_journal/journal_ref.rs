@@ -310,8 +310,7 @@ mod tests {
 
                     break 'read Some((
                         journal.cursor().unwrap(),
-                        [test_label_1, test_label_2, test_label_3],
-                        ]),
+                        [test_label_1, test_label_2, test_label_3]),
                     ));
                 }
             };
