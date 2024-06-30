@@ -152,6 +152,10 @@ jobs:
       - run: rustup toolchain install nightly --profile minimal --component miri
       - run: rustup override set nightly
       - run: cargo +nightly miri setup
+      # Ref: https://github.com/dtolnay/proc-macro2/issues/356
+      # Ref: https://github.com/dtolnay/proc-macro2/pull/348
+      # A better fix would be verifying the nightly is up to date.
+      - run: cargo update -p proc-macro2 --precise 1.0.43
       - run: cargo +nightly miri test --all-targets ${{ matrix.module }} -- --show-output
 
   e2e_tests:
