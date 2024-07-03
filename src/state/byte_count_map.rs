@@ -296,6 +296,7 @@ mod tests {
 
     #[test]
     fn works_on_one_thread() {
+        init_logger();
         static S: PromState = PromState::new();
 
         S.add_message_line_ingested(&map_key(b"one"), 123);
@@ -372,6 +373,7 @@ mod tests {
 
     #[test]
     fn works_on_two_contending_threads() {
+        init_logger();
         // Pre-allocate everything so it won't take a long time to run with all the allocations.
         // This is one of the slowest tests in Miri, so it's particularly helpful here.
         static S: PromState = PromState::new();
@@ -468,6 +470,7 @@ mod tests {
     // Extremely slow in Miri (might very well take over an hour). Just skip it.
     #[cfg_attr(miri, ignore)]
     fn works_on_a_hundred_contending_threads() {
+        init_logger();
         // Pre-allocate everything so it won't take a long time to run with all the allocations.
         static S: PromState = PromState::new();
 

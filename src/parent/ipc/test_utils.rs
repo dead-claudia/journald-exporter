@@ -74,6 +74,7 @@ impl StaticState {
     }
 
     pub fn init_test_state_with_key_dir(&'static self, key_dir: std::path::PathBuf) {
+        init_logger();
         self.state.init_dynamic(ParentIpcDynamic {
             port: std::num::NonZeroU16::new(1).unwrap(),
             child_user_group: UserGroup {

@@ -162,21 +162,23 @@ impl std::ops::Deref for LoggerCaptureGuard {
     }
 }
 
-// Initialize this for all tests. Easier than trying to pump it through literally everything, and
-// I can also use this to track down any/all stray logs.
-#[ctor::ctor]
-fn init_logger() {
-    // Don't log `trace!(...)` stuff.
-    if std::env::var("RUST_TRACE") == Ok("1".into()) {
-        log::set_max_level(log::LevelFilter::Trace);
-    } else {
-        log::set_max_level(log::LevelFilter::Debug);
-    }
-    log::set_logger(&TEST_LOGGER).unwrap();
+pub fn init_logger() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Don't log `trace!(...)` stuff.
+        let level = if std::env::var("RUST_TRACE") == Ok("1".into()) {
+            log::LevelFilter::Trace
+        } else {
+            log::LevelFilter::Debug
+        };
+        log::set_max_level(level);
+        log::set_logger(&TEST_LOGGER).unwrap();
+    });
 }
 
 #[must_use = "The returned guard must be live for the whole test to ensure all logs are captured."]
 pub fn setup_capture_logger() -> LoggerCaptureGuard {
+    init_logger();
     LoggerCaptureGuard(LoggerGuard::new(LoggerKind::LoggerVec(LogCapture {
         inner: Mutex::new(Vec::new()),
     })))
