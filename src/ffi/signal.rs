@@ -20,22 +20,33 @@ const MAX_SIGNUM: usize = 64;
 const RT_SIGNUM_START: libc::c_int = 32;
 
 #[cfg(test)]
-impl Arbitrary for Signal {
-    fn arbitrary(g: &mut Gen) -> Self {
+pub struct SignalShrinker(propcheck::I32Shrinker);
+
+#[cfg(test)]
+impl propcheck::Shrinker for SignalShrinker {
+    type Item = Signal;
+    fn next(&mut self) -> Option<&Self::Item> {
+        // SAFETY: Same layout
+        unsafe { std::mem::transmute(self.0.next()) }
+    }
+}
+
+#[cfg(test)]
+impl propcheck::Arbitrary for Signal {
+    type Shrinker = SignalShrinker;
+
+    fn arbitrary() -> Self {
         // static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| Signal::all_signals().collect());
         static SIGNALS: OnceCell<Vec<Signal>> = OnceCell::new();
-        let signals = SIGNALS.get_or_init(|| Signal::all_signals().collect());
-
-        *g.choose(signals).unwrap()
+        propcheck::random_entry(SIGNALS.get_or_init(|| Signal::all_signals().collect()))
     }
 
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(
-            self.0
-                .shrink()
-                .filter(|i| *i > sigrtmin().0 || *i <= 31)
-                .map(Signal),
-        )
+    fn clone(&self) -> Self {
+        *self
+    }
+
+    fn shrink(&self) -> Self::Shrinker {
+        SignalShrinker(self.0.shrink())
     }
 }
 

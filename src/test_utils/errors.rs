@@ -23,7 +23,7 @@ pub fn result_eq<T: PartialEq>(left: &io::Result<T>, right: &io::Result<T>) -> b
     }
 }
 
-static ERROR_KINDS: [ErrorKind; 20] = [
+pub(super) static ERROR_KINDS: &[ErrorKind] = &[
     ErrorKind::NotFound,
     ErrorKind::PermissionDenied,
     ErrorKind::ConnectionRefused,
@@ -46,165 +46,74 @@ static ERROR_KINDS: [ErrorKind; 20] = [
     ErrorKind::Other,
 ];
 
-fn kind_arbitrary(g: &mut Gen) -> ErrorKind {
-    *g.choose(&ERROR_KINDS).unwrap()
-}
-
-fn kind_shrink(kind: ErrorKind) -> impl Iterator<Item = ErrorKind> {
-    ERROR_KINDS.iter().copied().filter(move |k| *k < kind)
-}
-
-pub fn error_arbitrary(g: &mut Gen) -> Error {
-    enum S {
-        Code,
-        Kind,
-        Custom,
-    }
-
-    match g.choose(&[S::Code, S::Kind, S::Custom]).unwrap() {
-        S::Code => Error::from_raw_os_error(crate::ffi::errno_arbitrary(g)),
-        S::Kind => Error::from(kind_arbitrary(g)),
-        S::Custom => Error::new(kind_arbitrary(g), <String>::arbitrary(g)),
-    }
-}
-
-pub fn error_clone(error: &Error) -> Error {
-    match error.raw_os_error() {
-        Some(code) => Error::from_raw_os_error(code),
-        None => match error.get_ref() {
-            Some(inner) => Error::new(error.kind(), inner.to_string()),
-            None => Error::from(error.kind()),
-        },
-    }
-}
-
-pub fn error_shrink(error: &Error) -> Box<dyn Iterator<Item = Error>> {
-    // To avoid capturing `error` (and by proxy, `self`).
-    #[derive(Clone)]
-    enum E {
-        Code(libc::c_int),
-        Kind(ErrorKind),
-        Custom(ErrorKind, String),
-    }
-
-    let error_inspect = match error.raw_os_error() {
-        Some(code) => E::Code(code),
-        None => match error.get_ref() {
-            Some(inner) => E::Custom(error.kind(), inner.to_string()),
-            None => E::Kind(error.kind()),
-        },
-    };
-
-    match error_inspect {
-        E::Code(code) => Box::new(crate::ffi::errno_shrink(code).map(Error::from_raw_os_error)),
-        E::Kind(kind) => Box::new(kind_shrink(kind).map(Error::from)),
-        E::Custom(kind, inner) => Box::new(
-            kind_shrink(kind).flat_map(move |k| inner.shrink().map(move |i| Error::new(k, i))),
-        ),
-    }
-}
-
 // Skip these tests under Miri. They're test utilities and would just slow down Miri test runs.
 #[cfg(not(miri))]
+#[allow(clippy::as_conversions)]
+#[allow(clippy::bool_assert_comparison)]
 mod tests {
-    #![allow(clippy::bool_assert_comparison)]
 
     use super::*;
-
-    #[derive(Debug)]
-    struct ErrorSelect(Error);
-
-    impl Clone for ErrorSelect {
-        fn clone(&self) -> Self {
-            Self(error_clone(&self.0))
-        }
-    }
-
-    impl Arbitrary for ErrorSelect {
-        fn arbitrary(g: &mut Gen) -> Self {
-            Self(error_arbitrary(g))
-        }
-
-        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            Box::new(error_shrink(&self.0).map(Self))
-        }
-    }
-
-    #[derive(Debug)]
-    struct ResultSelect(io::Result<u8>);
-
-    impl Clone for ResultSelect {
-        fn clone(&self) -> Self {
-            Self(match &self.0 {
-                Ok(v) => Ok(*v),
-                Err(e) => Err(error_clone(e)),
-            })
-        }
-    }
-
-    impl Arbitrary for ResultSelect {
-        fn arbitrary(g: &mut Gen) -> Self {
-            Self(<Result<u8, ErrorSelect>>::arbitrary(g).map_err(|e| e.0))
-        }
-
-        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            match &self.0 {
-                Ok(v) => Box::new(v.shrink().map(|v| Self(Ok(v)))),
-                Err(e) => Box::new(error_shrink(e).map(|e| Self(Err(e)))),
-            }
-        }
-    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct ErrnoSelect(libc::c_int);
 
-    impl Arbitrary for ErrnoSelect {
-        fn arbitrary(g: &mut Gen) -> Self {
-            Self(crate::ffi::errno_arbitrary(g))
-        }
+    struct ErrnoShrinker(propcheck::UsizeShrinker, ErrnoSelect);
 
-        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            Box::new(crate::ffi::errno_shrink(self.0).map(Self))
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct KindSelect(ErrorKind);
-
-    impl Arbitrary for KindSelect {
-        fn arbitrary(g: &mut Gen) -> Self {
-            Self(kind_arbitrary(g))
-        }
-
-        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-            Box::new(kind_shrink(self.0).map(Self))
+    impl propcheck::Shrinker for ErrnoShrinker {
+        type Item = ErrnoSelect;
+        fn next(&mut self) -> Option<&Self::Item> {
+            self.1 = ErrnoSelect(crate::ffi::ERRNO_LIST[*self.0.next()?]);
+            Some(&self.1)
         }
     }
 
-    #[quickcheck]
-    fn error_eq_holds_for_raw_os_errors(code_a: ErrnoSelect, code_b: ErrnoSelect) -> bool {
-        let a = Error::from_raw_os_error(code_a.0);
-        let b = Error::from_raw_os_error(code_b.0);
-        error_eq(&a, &b) == (code_a == code_b)
+    impl propcheck::Arbitrary for ErrnoSelect {
+        type Shrinker = ErrnoShrinker;
+
+        fn arbitrary() -> Self {
+            Self(rand::random())
+        }
+
+        fn clone(&self) -> Self {
+            Self(self.0)
+        }
+
+        fn shrink(&self) -> Self::Shrinker {
+            let index = crate::ffi::ERRNO_LIST
+                .iter()
+                .position(|c| *c == self.0)
+                .unwrap();
+            ErrnoShrinker(index.shrink(), Self(0))
+        }
     }
 
-    #[quickcheck]
-    fn error_eq_holds_for_same_kinds(kind_a: KindSelect, kind_b: KindSelect) -> bool {
-        let a = Error::from(kind_a.0);
-        let b = Error::from(kind_b.0);
-        error_eq(&a, &b) == (kind_a == kind_b)
+    #[test]
+    fn error_eq_holds_for_raw_os_errors() {
+        propcheck::run(|&[ErrnoSelect(code_a), ErrnoSelect(code_b)]: &[_; 2]| {
+            let a = Error::from_raw_os_error(code_a);
+            let b = Error::from_raw_os_error(code_b);
+            error_eq(&a, &b) == (code_a == code_b)
+        });
     }
 
-    #[quickcheck]
-    fn error_eq_holds_for_same_customs(
-        kind_a: KindSelect,
-        msg_a: String,
-        kind_b: KindSelect,
-        msg_b: String,
-    ) -> bool {
-        let a = Error::new(kind_a.0, msg_a.clone());
-        let b = Error::new(kind_b.0, msg_b.clone());
-        error_eq(&a, &b) == (kind_a == kind_b && msg_a == msg_b)
+    #[test]
+    fn error_eq_holds_for_same_kinds() {
+        propcheck::run(|&[kind_a, kind_b]: &[std::io::ErrorKind; 2]| {
+            let a = Error::from(kind_a);
+            let b = Error::from(kind_b);
+            error_eq(&a, &b) == (kind_a == kind_b)
+        });
+    }
+
+    #[test]
+    fn error_eq_holds_for_same_customs() {
+        propcheck::run(
+            |[(kind_a, msg_a), (kind_b, msg_b)]: &[(std::io::ErrorKind, String); 2]| {
+                let a = Error::new(*kind_a, msg_a.clone());
+                let b = Error::new(*kind_b, msg_b.clone());
+                error_eq(&a, &b) == (kind_a == kind_b && msg_a == msg_b)
+            },
+        );
     }
 
     #[test]
@@ -249,28 +158,31 @@ mod tests {
         assert_eq!(error_eq(&a, &b), false);
     }
 
-    #[quickcheck]
-    fn error_eq_equality_is_reflexive(a: ErrorSelect) -> bool {
-        error_eq(&a.0, &a.0)
+    #[test]
+    fn error_eq_equality_is_reflexive() {
+        propcheck::run(|a: &std::io::Error| error_eq(a, a));
     }
 
-    #[quickcheck]
-    fn error_eq_equality_is_reflexive_across_clones(a: ErrorSelect) -> bool {
-        error_eq(&error_clone(&a.0), &a.0)
+    #[test]
+    fn error_eq_equality_is_reflexive_across_clones() {
+        use propcheck::Arbitrary as _;
+        propcheck::run(|a: &std::io::Error| error_eq(&a.clone(), a));
     }
 
-    #[quickcheck]
-    fn error_eq_equality_is_symmetric(a: ErrorSelect, b: ErrorSelect) -> bool {
-        error_eq(&a.0, &b.0) == error_eq(&b.0, &a.0)
+    #[test]
+    fn error_eq_equality_is_symmetric() {
+        propcheck::run(|[a, b]: &[std::io::Error; 2]| error_eq(a, b) == error_eq(b, a));
     }
 
-    #[quickcheck]
-    fn error_eq_equality_is_transitive(a: ErrorSelect, b: ErrorSelect, c: ErrorSelect) -> bool {
-        if error_eq(&a.0, &b.0) && error_eq(&b.0, &c.0) {
-            error_eq(&a.0, &c.0)
-        } else {
-            true // just pass the test
-        }
+    #[test]
+    fn error_eq_equality_is_transitive() {
+        propcheck::run(|[a, b, c]: &[std::io::Error; 3]| {
+            if error_eq(a, b) && error_eq(b, c) {
+                error_eq(a, c)
+            } else {
+                true // just pass the test
+            }
+        });
     }
 
     #[test]
@@ -289,14 +201,17 @@ mod tests {
         ));
     }
 
-    #[quickcheck]
-    fn result_eq_holds_for_ok(a: u8, b: u8) -> bool {
-        result_eq(&Ok(a), &Ok(b)) == (a == b)
+    #[test]
+    fn result_eq_holds_for_ok() {
+        propcheck::run(|&[a, b]: &[u8; 2]| result_eq(&Ok(a), &Ok(b)) == (a == b));
     }
 
-    #[quickcheck]
-    fn result_eq_holds_for_errors(a: ErrorSelect, b: ErrorSelect) -> bool {
-        error_eq(&a.0, &b.0) == result_eq::<u8>(&Err(a.0), &Err(b.0))
+    #[test]
+    fn result_eq_holds_for_errors() {
+        use propcheck::Arbitrary as _;
+        propcheck::run(|[a, b]: &[std::io::Error; 2]| {
+            error_eq(a, b) == result_eq::<()>(&Err(a.clone()), &Err(b.clone()))
+        });
     }
 
     #[test]
@@ -313,29 +228,32 @@ mod tests {
         assert_eq!(result_eq(&a, &b), false);
     }
 
-    #[quickcheck]
-    fn result_eq_equality_is_reflexive(a: ResultSelect) -> bool {
-        result_eq(&a.0, &a.0)
+    #[test]
+    fn result_eq_equality_is_reflexive() {
+        propcheck::run(|a: &std::io::Result<u8>| result_eq(a, a));
     }
 
-    #[quickcheck]
+    #[test]
     #[allow(clippy::redundant_clone)]
-    fn result_eq_equality_is_reflexive_across_clones(a: ResultSelect) -> bool {
-        result_eq(&a.clone().0, &a.0)
+    fn result_eq_equality_is_reflexive_across_clones() {
+        use propcheck::Arbitrary as _;
+        propcheck::run(|a: &std::io::Result<u8>| result_eq(&a.clone(), a));
     }
 
-    #[quickcheck]
-    fn result_eq_equality_is_symmetric(a: ResultSelect, b: ResultSelect) -> bool {
-        result_eq(&a.0, &b.0) == result_eq(&b.0, &a.0)
+    #[test]
+    fn result_eq_equality_is_symmetric() {
+        propcheck::run(|[a, b]: &[std::io::Result<u8>; 2]| result_eq(a, b) == result_eq(b, a));
     }
 
-    #[quickcheck]
-    fn result_eq_equality_is_transitive(a: ResultSelect, b: ResultSelect, c: ResultSelect) -> bool {
-        if result_eq(&a.0, &b.0) && result_eq(&b.0, &c.0) {
-            result_eq(&a.0, &c.0)
-        } else {
-            true // just pass the test
-        }
+    #[test]
+    fn result_eq_equality_is_transitive() {
+        propcheck::run(|[a, b, c]: &[std::io::Result<u8>; 3]| {
+            if result_eq(a, b) && result_eq(b, c) {
+                result_eq(a, c)
+            } else {
+                true // just pass the test
+            }
+        });
     }
 
     #[test]

@@ -137,8 +137,8 @@ enum ParserState {
     Name(IdName),
     NameEnd(IdName),
     Password(IdName),
-    IdStart(IdName, u32),
-    IdPart(IdName, u32),
+    IdStart(IdName, U32Parser),
+    IdPart(IdName, U32Parser),
 }
 
 pub struct PasswdGroupParser {
@@ -209,23 +209,23 @@ impl PasswdGroupParser {
                 }
 
                 (ParserState::Password(name), b':') => {
-                    self.state = ParserState::IdStart(name, 0);
+                    self.state = ParserState::IdStart(name, U32Parser::new());
                 }
 
                 (ParserState::Password(name), _) => {
                     self.state = ParserState::Password(name);
                 }
 
-                (ParserState::IdPart(name, acc), b':') => {
-                    if !self.insert_name(name, acc) {
+                (ParserState::IdPart(name, parser), b':') => {
+                    if !self.insert_name(name, parser.extract()) {
                         return false;
                     }
                     self.state = ParserState::Drop;
                 }
 
-                (ParserState::IdStart(name, acc) | ParserState::IdPart(name, acc), _) => {
-                    match parse_u32_digit(acc, ch) {
-                        Some(acc) => self.state = ParserState::IdPart(name, acc),
+                (ParserState::IdStart(name, parser) | ParserState::IdPart(name, parser), _) => {
+                    match parser.eat(ch) {
+                        Some(parser) => self.state = ParserState::IdPart(name, parser),
                         None => self.state = ParserState::Drop,
                     }
                 }

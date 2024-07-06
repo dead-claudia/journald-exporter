@@ -4,7 +4,7 @@ use super::ByteCountTableKey;
 use super::MessageKey;
 
 #[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(Clone, Copy))]
+#[cfg_attr(test, derive(Clone))]
 pub struct ByteCountSnapshotEntry {
     pub key: MessageKey,
     pub lines: u64,
@@ -475,14 +475,14 @@ mod tests {
         static S: PromState = PromState::new();
 
         const CONTENDS_LISTS: [[MessageKey; 10]; 100] = {
-            let inner = [map_key(b"placeholder"); 10];
-            let mut result = [inner; 100];
+            const INNER: [MessageKey; 10] = [const { map_key(b"placeholder") }; 10];
+            let mut result = [INNER; 100];
             let mut i = 0;
             while i < 100 {
                 let mut j = 0;
                 let tens = b'0'.wrapping_add(i / 10);
                 let ones = b'0'.wrapping_add(i % 10);
-                let mut inner = inner;
+                let mut inner = INNER;
                 while j < 10 {
                     let last = b'0'.wrapping_add(j);
                     let mut base = *b"contend_00_0";
@@ -498,54 +498,44 @@ mod tests {
             result
         };
 
-        const EXPECTED_DATA: &[ByteCountSnapshotEntry] = &{
-            let mut result = [ByteCountSnapshotEntry {
+        let mut expected_data = vec![
+            ByteCountSnapshotEntry {
                 key: map_key(b"placeholder"),
                 lines: 1,
                 bytes: 1,
-            }; KEYS.len() + 1000];
-
-            // Don't format this bit. It'll just make this less readable.
-            #[rustfmt::skip]
-            #[allow(clippy::let_unit_value)]
-            let _ = {
-                result[0] = ByteCountSnapshotEntry { key: map_key(b"test_1"), lines: 10_000, bytes: 100_000 };
-                result[1] = ByteCountSnapshotEntry { key: map_key(b"test_2"), lines: 10_000, bytes: 100_000 };
-                result[2] = ByteCountSnapshotEntry { key: map_key(b"test_3"), lines: 10_000, bytes: 100_000 };
-                result[3] = ByteCountSnapshotEntry { key: map_key(b"test_4"), lines: 10_000, bytes: 100_000 };
-                result[4] = ByteCountSnapshotEntry { key: map_key(b"test_5"), lines: 10_000, bytes: 100_000 };
-                result[5] = ByteCountSnapshotEntry { key: map_key(b"test_6"), lines: 10_000, bytes: 100_000 };
-                result[6] = ByteCountSnapshotEntry { key: map_key(b"test_7"), lines: 10_000, bytes: 100_000 };
-                result[7] = ByteCountSnapshotEntry { key: map_key(b"test_8"), lines: 10_000, bytes: 100_000 };
-                result[8] = ByteCountSnapshotEntry { key: map_key(b"test_9"), lines: 10_000, bytes: 100_000 };
-                result[9] = ByteCountSnapshotEntry { key: map_key(b"test_10"), lines: 10_000, bytes: 100_000 };
-                result[10] = ByteCountSnapshotEntry { key: map_key(b"test_11"), lines: 10_000, bytes: 100_000 };
-                result[11] = ByteCountSnapshotEntry { key: map_key(b"test_12"), lines: 10_000, bytes: 100_000 };
-                result[12] = ByteCountSnapshotEntry { key: map_key(b"test_13"), lines: 10_000, bytes: 100_000 };
-                result[13] = ByteCountSnapshotEntry { key: map_key(b"test_14"), lines: 10_000, bytes: 100_000 };
-                result[14] = ByteCountSnapshotEntry { key: map_key(b"test_15"), lines: 10_000, bytes: 100_000 };
-                result[15] = ByteCountSnapshotEntry { key: map_key(b"test_16"), lines: 10_000, bytes: 100_000 };
             };
+            KEYS.len() + 1000
+        ];
 
-            let mut target = 16;
-            let mut i = 0;
-            while i < CONTENDS_LISTS.len() {
-                let entry = &CONTENDS_LISTS[i];
-                let mut j = 0;
-                while j < entry.len() {
-                    result[target] = ByteCountSnapshotEntry {
-                        key: entry[j],
-                        lines: 1,
-                        bytes: 1,
-                    };
-                    j += 1;
-                    target += 1;
-                }
-                i += 1;
-            }
-
-            result
+        // Don't format this bit. It'll just make this less readable.
+        #[rustfmt::skip]
+        #[allow(clippy::let_unit_value)]
+        let _ = {
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_1"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_2"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_3"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_4"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_5"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_6"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_7"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_8"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_9"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_10"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_11"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_12"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_13"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_14"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_15"), lines: 10_000, bytes: 100_000 });
+            expected_data.push(ByteCountSnapshotEntry { key: map_key(b"test_16"), lines: 10_000, bytes: 100_000 });
         };
+
+        expected_data.extend(CONTENDS_LISTS.iter().flat_map(|entry| {
+            entry.iter().map(|key| ByteCountSnapshotEntry {
+                key: key.clone(),
+                lines: 1,
+                bytes: 1,
+            })
+        }));
 
         std::thread::scope(|s| {
             for list in &CONTENDS_LISTS {
@@ -564,7 +554,7 @@ mod tests {
                 unreadable_fields: 0,
                 corrupted_fields: 0,
                 metrics_requests: 0,
-                messages_ingested: ByteCountSnapshot::build(EXPECTED_DATA.iter().cloned()),
+                messages_ingested: ByteCountSnapshot::build(expected_data.iter().cloned()),
             }
         );
     }

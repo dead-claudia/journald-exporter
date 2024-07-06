@@ -1104,10 +1104,12 @@ journald_messages_ingested_bytes_total{service=\"foo\",priority=\"DEBUG\",severi
 fn renders_500_faults_and_400_different_service_messages() {
     // Move most the overhead to compile-time.
     static MESSAGES_INGESTED: [ByteCountSnapshotEntry; 160] = {
-        let mut result = [ByteCountSnapshotEntry {
-            key: MessageKey::build(None, None, None, Priority::Emergency),
-            lines: 0,
-            bytes: 0,
+        let mut result = [const {
+            ByteCountSnapshotEntry {
+                key: MessageKey::build(None, None, None, Priority::Emergency),
+                lines: 0,
+                bytes: 0,
+            }
         }; 160];
 
         let service_names: [&[u8]; 20] = [
@@ -1176,7 +1178,7 @@ fn renders_500_faults_and_400_different_service_messages() {
         unreadable_fields: 0,
         corrupted_fields: 0,
         metrics_requests: 0,
-        messages_ingested: ByteCountSnapshot::build(MESSAGES_INGESTED),
+        messages_ingested: ByteCountSnapshot::build(MESSAGES_INGESTED.iter().cloned()),
     });
 
     assert_snapshot_eq(

@@ -190,7 +190,7 @@ pub fn normalize_errno(e: Error, syscall: Option<&'static str>) -> Cow<'static, 
 }
 
 #[cfg(test)]
-static ERRNO_LIST: &[libc::c_int] = &[
+pub static ERRNO_LIST: &[libc::c_int] = &[
     libc::EPERM,
     libc::ENOENT,
     libc::ESRCH,
@@ -325,16 +325,6 @@ static ERRNO_LIST: &[libc::c_int] = &[
     libc::ENOTSUP,
     libc::EWOULDBLOCK,
 ];
-
-#[cfg(test)]
-pub fn errno_arbitrary(g: &mut Gen) -> libc::c_int {
-    *g.choose(ERRNO_LIST).unwrap()
-}
-
-#[cfg(test)]
-pub fn errno_shrink(code: libc::c_int) -> impl Iterator<Item = libc::c_int> {
-    ERRNO_LIST.iter().copied().filter(move |c| *c < code)
-}
 
 #[cold]
 #[inline(never)]

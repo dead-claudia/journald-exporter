@@ -33,7 +33,4 @@ pub use test_prelude::*;
 #[cfg(test)]
 mod test_prelude {
     pub use crate::test_utils::*;
-    pub use quickcheck::Arbitrary;
-    pub use quickcheck::Gen;
-    pub use quickcheck_macros::quickcheck;
 }

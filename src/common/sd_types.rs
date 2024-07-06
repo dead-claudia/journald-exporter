@@ -1,5 +1,8 @@
 use crate::prelude::*;
 
+#[cfg(test)]
+use rand::Rng as _;
+
 //  ######
 //  #     # #####  #  ####  #####  # ##### #   #
 //  #     # #    # # #    # #    # #   #    # #
@@ -9,6 +12,7 @@ use crate::prelude::*;
 //  #       #    # #  ####  #    # #   #     #
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
 pub enum Priority {
     #[allow(dead_code)]
     Emergency = 0,
@@ -29,24 +33,31 @@ pub enum Priority {
 }
 
 #[cfg(test)]
-impl Arbitrary for Priority {
-    fn arbitrary(g: &mut Gen) -> Self {
-        *g.choose(&[
-            Self::Emergency,
-            Self::Alert,
-            Self::Critical,
-            Self::Error,
-            Self::Warning,
-            Self::Notice,
-            Self::Informational,
-            Self::Debug,
-        ])
-        .unwrap()
+pub struct PriorityShrinker(propcheck::U8Shrinker);
+
+#[cfg(test)]
+impl propcheck::Shrinker for PriorityShrinker {
+    type Item = Priority;
+    fn next(&mut self) -> Option<&Self::Item> {
+        // SAFETY: Same layout, and shrinkers only grow down.
+        unsafe { std::mem::transmute(self.0.next()) }
+    }
+}
+
+#[cfg(test)]
+impl propcheck::Arbitrary for Priority {
+    type Shrinker = PriorityShrinker;
+
+    fn arbitrary() -> Self {
+        Priority::from_severity_index(rand::thread_rng().gen_range(0..=7)).unwrap()
     }
 
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let byte = self.as_severity_byte();
-        Box::new((b'0'..byte).map(|byte| Self::from_severity_value(&[byte]).unwrap()))
+    fn clone(&self) -> Self {
+        *self
+    }
+
+    fn shrink(&self) -> Self::Shrinker {
+        PriorityShrinker(self.as_severity_index().shrink())
     }
 }
 
@@ -179,7 +190,6 @@ impl<'a> Service<'a> {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(test, derive(Copy))]
 pub struct ServiceRepr {
     service_len: u16,
     //             [u8; MAX_SERVICE_LEN]
@@ -241,10 +251,6 @@ impl fmt::Debug for ServiceRepr {
     }
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct ArbitraryServiceChar(u8);
-
 // Note: this must remain sorted by code point.
 #[cfg(test)]
 static SERVICE_CHARS: &[u8] =
@@ -258,31 +264,39 @@ fn test_service_chars_are_sorted() {
 }
 
 #[cfg(test)]
-impl Arbitrary for ArbitraryServiceChar {
-    fn arbitrary(g: &mut Gen) -> Self {
-        Self(*g.choose(SERVICE_CHARS).unwrap())
-    }
+pub struct ServiceReprShrinker {
+    inner: propcheck::VecShrinker<u8>,
+    result: ServiceRepr,
+}
 
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let max = self.0;
-        Box::new(
-            SERVICE_CHARS
-                .iter()
-                .cloned()
-                .take_while(move |c| *c < max)
-                .map(Self),
-        )
+#[cfg(test)]
+impl propcheck::Shrinker for ServiceReprShrinker {
+    type Item = ServiceRepr;
+
+    fn next(&mut self) -> Option<&Self::Item> {
+        let v = self.inner.next()?;
+        if v.is_empty() {
+            None
+        } else {
+            self.result.service_len = truncate_usize_u16(v.len());
+            for (target, src) in self.result.service_bytes.iter_mut().zip(v) {
+                *target = SERVICE_CHARS[zero_extend_u8_usize(*src)];
+            }
+            Some(&self.result)
+        }
     }
 }
 
 #[cfg(test)]
-impl Arbitrary for ServiceRepr {
-    fn arbitrary(g: &mut Gen) -> Self {
-        let service_len = zero_extend_u8_usize(<u8>::arbitrary(g)).wrapping_add(1);
+impl propcheck::Arbitrary for ServiceRepr {
+    type Shrinker = ServiceReprShrinker;
+
+    fn arbitrary() -> Self {
+        let service_len = zero_extend_u8_usize(rand::random()).wrapping_add(1);
         let mut service_bytes = [0; MAX_SERVICE_LEN];
 
         for target in service_bytes[..service_len].iter_mut() {
-            *target = <ArbitraryServiceChar>::arbitrary(g).0;
+            *target = propcheck::random_entry(SERVICE_CHARS);
         }
 
         Self {
@@ -291,21 +305,15 @@ impl Arbitrary for ServiceRepr {
         }
     }
 
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let as_arbitrary_bytes: &[ArbitraryServiceChar] =
-                // SAFETY: `ArbitraryServiceChar` and `u8` have the same internal representation,
-                // and only valid service characters are stored within `ArbitraryService` boxes.
-                unsafe { std::mem::transmute(self.as_bytes()) };
+    fn clone(&self) -> Self {
+        Clone::clone(self)
+    }
 
-        Box::new(Vec::from(as_arbitrary_bytes).shrink().filter_map(|v| {
-            if v.is_empty() {
-                None
-            } else {
-                // SAFETY: `ArbitraryServiceChar` and `u8` have the same bit representation,
-                // and it's always safe to transmute from the former to the latter.
-                Some(Self::new(Some(unsafe { std::mem::transmute(&*v) })).unwrap())
-            }
-        }))
+    fn shrink(&self) -> Self::Shrinker {
+        ServiceReprShrinker {
+            inner: self.as_bytes().to_vec().shrink(),
+            result: ServiceRepr::EMPTY,
+        }
     }
 }
 

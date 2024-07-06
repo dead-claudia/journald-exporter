@@ -29,16 +29,13 @@ pub struct IpcExitStatus {
     pub child_wait_error: Option<Error>,
 }
 
-// Only implement it for test, so it can satisfy `Arbitrary`. In prod, it should never be cloned
-// like this.
+// Only implement it for test. In prod, it should never be cloned like this. Some tests do rely on
+// this definition, though, and it's a lot more convenient to implement it here than to add a
+// `use propcheck::Arbitrary as _` before about every use.
 #[cfg(test)]
 impl Clone for IpcExitStatus {
     fn clone(&self) -> Self {
-        Self {
-            result: self.result,
-            parent_error: self.parent_error.as_ref().map(error_clone),
-            child_wait_error: self.child_wait_error.as_ref().map(error_clone),
-        }
+        propcheck::Arbitrary::clone(self)
     }
 }
 
@@ -63,80 +60,80 @@ impl PartialEq for IpcExitStatus {
 impl Eq for IpcExitStatus {}
 
 #[cfg(test)]
-impl Arbitrary for IpcExitStatus {
-    fn arbitrary(g: &mut Gen) -> Self {
+pub struct IpcExitStatusShrinker(
+    propcheck::Tuple3Shrinker<Option<ExitResult>, Option<Error>, Option<Error>>,
+);
+
+#[cfg(test)]
+impl propcheck::Shrinker for IpcExitStatusShrinker {
+    type Item = IpcExitStatus;
+
+    fn next(&mut self) -> Option<&Self::Item> {
+        // SAFETY: same layout
+        unsafe { std::mem::transmute(self.0.next()) }
+    }
+}
+
+#[cfg(test)]
+impl propcheck::Arbitrary for IpcExitStatus {
+    type Shrinker = IpcExitStatusShrinker;
+
+    fn arbitrary() -> Self {
+        let (result, parent_error, child_wait_error) =
+            <(Option<ExitResult>, Option<Error>, Option<Error>)>::arbitrary();
+
         Self {
-            result: Arbitrary::arbitrary(g),
-            parent_error: <bool>::arbitrary(g).then(|| error_arbitrary(g)),
-            child_wait_error: <bool>::arbitrary(g).then(|| error_arbitrary(g)),
+            result,
+            parent_error,
+            child_wait_error,
         }
     }
 
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        let result = self.result;
-        let child_wait_error = self.child_wait_error.as_ref().map(error_clone);
+    fn clone(&self) -> Self {
+        Self {
+            result: self.result,
+            parent_error: self.parent_error.clone(),
+            child_wait_error: self.child_wait_error.clone(),
+        }
+    }
 
-        let parent_shrink = match &self.parent_error {
-            None => {
-                let iter: Box<dyn Iterator<Item = _>> = Box::new(std::iter::once(None));
-                iter
-            }
-            Some(e) => Box::new(std::iter::once(None).chain(error_shrink(e).map(Some))),
-        };
-
-        let child_wait_shrink = parent_shrink.flat_map(move |parent| match &child_wait_error {
-            None => {
-                let iter: Box<dyn Iterator<Item = _>> = Box::new(std::iter::once((parent, None)));
-                iter
-            }
-            Some(e) => Box::new(
-                std::iter::once((parent.as_ref().map(error_clone), None)).chain(
-                    error_shrink(e).map(move |child_wait| {
-                        (parent.as_ref().map(error_clone), Some(child_wait))
-                    }),
-                ),
-            ),
-        });
-
-        Box::new(child_wait_shrink.flat_map(move |(parent, child_wait)| {
-            result.shrink().map(move |r| IpcExitStatus {
-                result: r,
-                parent_error: parent.as_ref().map(error_clone),
-                child_wait_error: child_wait.as_ref().map(error_clone),
-            })
-        }))
+    fn shrink(&self) -> Self::Shrinker {
+        // SAFETY: same layout
+        IpcExitStatusShrinker(unsafe {
+            std::mem::transmute::<_, &(Option<ExitResult>, Option<Error>, Option<Error>)>(self)
+                .shrink()
+        })
     }
 }
 
 // Skip all these tests in Miri. They take a while and are just testing test utilities.
 #[cfg(all(test, not(miri)))]
+#[allow(clippy::as_conversions)]
 mod tests {
     use super::*;
 
     use crate::ffi::ExitCode;
     use crate::ffi::Signal;
 
-    #[quickcheck]
-    fn ipc_exit_status_equality_is_reflexive(a: IpcExitStatus) -> bool {
-        a == a
+    #[test]
+    fn ipc_exit_status_equality_is_reflexive() {
+        propcheck::run(|a: &IpcExitStatus| a == a);
     }
 
-    #[quickcheck]
-    fn ipc_exit_status_equality_is_symmetric(a: IpcExitStatus, b: IpcExitStatus) -> bool {
-        (a == b) == (b == a)
+    #[test]
+    fn ipc_exit_status_equality_is_symmetric() {
+        propcheck::run(|[a, b]: &[IpcExitStatus; 2]| (a == b) == (b == a));
     }
 
-    #[quickcheck]
-    fn ipc_exit_status_equality_is_transitive(
-        a: IpcExitStatus,
-        b: IpcExitStatus,
-        c: IpcExitStatus,
-    ) -> bool {
-        if a == b && b == c {
-            a == c
-        } else {
-            true // just pass the test
-        }
+    #[test]
+    fn ipc_exit_status_equality_is_transitive() {
+        propcheck::run(|[a, b, c]: &[IpcExitStatus; 3]| {
+            if a == b && b == c {
+                a == c
+            } else {
+                true // just pass the test
+            }
+        });
     }
 
     #[test]

@@ -30,26 +30,51 @@ pub enum ExitResult {
 }
 
 #[cfg(test)]
-impl Arbitrary for ExitResult {
-    fn arbitrary(g: &mut Gen) -> Self {
-        match <bool>::arbitrary(g) {
-            true => ExitResult::Code(ExitCode(Arbitrary::arbitrary(g))),
-            false => ExitResult::Signal(Arbitrary::arbitrary(g)),
-        }
+pub struct ExitResultShrinker(propcheck::ResultShrinker<u8, i32>);
+
+// SAFETY: It's checking these unsafe invariants.
+const _: () = unsafe {
+    if !matches!(
+        std::mem::transmute::<Result<u8, i32>, ExitResult>(Ok(123)),
+        ExitResult::Code(ExitCode(123))
+    ) {
+        panic!("Ok does not match ExitResult::Code");
     }
 
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        match self {
-            ExitResult::Code(code) => {
-                Box::new(code.0.shrink().map(|c| ExitResult::Code(ExitCode(c))))
-            }
-            ExitResult::Signal(signal) => Box::new(
-                signal
-                    .shrink()
-                    .map(ExitResult::Signal)
-                    .chain(u8::MAX.shrink().map(|c| ExitResult::Code(ExitCode(c)))),
-            ),
-        }
+    if !matches!(
+        std::mem::transmute::<Result<u8, i32>, ExitResult>(Err(Signal::SIGABRT.as_raw())),
+        ExitResult::Signal(Signal::SIGABRT)
+    ) {
+        panic!("Ok does not match ExitResult::Code");
+    }
+};
+
+#[cfg(test)]
+impl propcheck::Shrinker for ExitResultShrinker {
+    type Item = ExitResult;
+
+    fn next(&mut self) -> Option<&Self::Item> {
+        // SAFETY: Invariants checked above
+        unsafe { std::mem::transmute(self.0.next()) }
+    }
+}
+
+#[cfg(test)]
+impl propcheck::Arbitrary for ExitResult {
+    type Shrinker = ExitResultShrinker;
+
+    fn arbitrary() -> Self {
+        // SAFETY: Invariants checked above
+        unsafe { std::mem::transmute(<Result<u8, i32>>::arbitrary()) }
+    }
+
+    fn clone(&self) -> Self {
+        *self
+    }
+
+    fn shrink(&self) -> Self::Shrinker {
+        // SAFETY: Invariants checked above
+        unsafe { ExitResultShrinker(std::mem::transmute::<_, Result<u8, i32>>(self).shrink()) }
     }
 }
 

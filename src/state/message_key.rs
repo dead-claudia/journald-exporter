@@ -16,7 +16,6 @@ Precedence for ordering, where `a < b` implies `a` comes before `b`:
 */
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(test, derive(Copy))]
 pub struct ByteCountTableKey {
     pub uid: Option<u32>,
     pub gid: Option<u32>,
@@ -29,34 +28,8 @@ impl ByteCountTableKey {
     }
 }
 
-#[cfg(test)]
-fn build_byte_count_key_tuple(
-    (uid, gid, service_repr): (Option<u32>, Option<u32>, ServiceRepr),
-) -> ByteCountTableKey {
-    ByteCountTableKey {
-        uid,
-        gid,
-        service_repr,
-    }
-}
-
-#[cfg(test)]
-impl Arbitrary for ByteCountTableKey {
-    fn arbitrary(g: &mut Gen) -> Self {
-        build_byte_count_key_tuple(Arbitrary::arbitrary(g))
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(
-            (self.uid, self.gid, self.service_repr)
-                .shrink()
-                .map(build_byte_count_key_tuple),
-        )
-    }
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(test, derive(Clone, Copy))]
+#[cfg_attr(test, derive(Clone))]
 pub struct MessageKey {
     pub priority: Priority,
     pub table_key: ByteCountTableKey,
@@ -70,27 +43,6 @@ impl fmt::Debug for MessageKey {
             .field("priority", &self.priority)
             .field("service", &self.service())
             .finish()
-    }
-}
-
-#[cfg(test)]
-impl Arbitrary for MessageKey {
-    fn arbitrary(g: &mut Gen) -> Self {
-        Self {
-            priority: Arbitrary::arbitrary(g),
-            table_key: Arbitrary::arbitrary(g),
-        }
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
-        Box::new(
-            (self.priority, self.table_key)
-                .shrink()
-                .map(|(priority, key)| Self {
-                    priority,
-                    table_key: key,
-                }),
-        )
     }
 }
 
@@ -138,6 +90,7 @@ impl MessageKey {
 }
 
 #[cfg(test)]
+#[allow(clippy::as_conversions)]
 mod tests {
     use super::*;
 
@@ -229,128 +182,150 @@ mod tests {
 
     // Per-group properties
 
-    #[quickcheck]
-    fn orders_based_on_priority(a: Priority, b: Priority) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.priority = a;
-        key2.priority = b;
-        key1.cmp(&key2) == a.cmp(&b)
+    #[test]
+    fn orders_based_on_priority() {
+        propcheck::run(|&(a, b): &(Priority, Priority)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.priority = a;
+            key2.priority = b;
+            key1.cmp(&key2) == a.cmp(&b)
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_uid(a: libc::uid_t, b: libc::uid_t) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.table_key.uid = Some(a);
-        key2.table_key.uid = Some(b);
-        key1.cmp(&key2) == a.cmp(&b)
+    #[test]
+    fn orders_based_on_uid() {
+        propcheck::run(|&(a, b): &(libc::uid_t, libc::uid_t)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.table_key.uid = Some(a);
+            key2.table_key.uid = Some(b);
+            key1.cmp(&key2) == a.cmp(&b)
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_gid(a: libc::gid_t, b: libc::gid_t) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.table_key.gid = Some(a);
-        key2.table_key.gid = Some(b);
-        key1.cmp(&key2) == a.cmp(&b)
+    #[test]
+    fn orders_based_on_gid() {
+        propcheck::run(|&(a, b): &(libc::gid_t, libc::gid_t)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.table_key.gid = Some(a);
+            key2.table_key.gid = Some(b);
+            key1.cmp(&key2) == a.cmp(&b)
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_service(a: ServiceRepr, b: ServiceRepr) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
+    #[test]
+    fn orders_based_on_service() {
+        propcheck::run(|(a, b): &(ServiceRepr, ServiceRepr)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
 
-        key1.set_service(a.as_service().unwrap());
-        key2.set_service(b.as_service().unwrap());
-        key1.cmp(&key2) == service_compare(a.as_service().unwrap(), b.as_service().unwrap())
+            key1.set_service(a.as_service().unwrap());
+            key2.set_service(b.as_service().unwrap());
+            key1.cmp(&key2) == service_compare(a.as_service().unwrap(), b.as_service().unwrap())
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_priority_with_all_fields_initialized(a: Priority, b: Priority) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.priority = a;
-        key1.table_key.uid = Some(123);
-        key1.table_key.gid = Some(123);
-        key1.set_service(s(b"test.service"));
-        key2.priority = b;
-        key2.table_key.uid = Some(123);
-        key2.table_key.gid = Some(123);
-        key2.set_service(s(b"test.service"));
-        key1.cmp(&key2) == a.cmp(&b)
+    #[test]
+    fn orders_based_on_priority_with_all_fields_initialized() {
+        propcheck::run(|&(a, b): &(Priority, Priority)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.priority = a;
+            key1.table_key.uid = Some(123);
+            key1.table_key.gid = Some(123);
+            key1.set_service(s(b"test.service"));
+            key2.priority = b;
+            key2.table_key.uid = Some(123);
+            key2.table_key.gid = Some(123);
+            key2.set_service(s(b"test.service"));
+            key1.cmp(&key2) == a.cmp(&b)
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_uid_with_all_fields_initialized(a: libc::uid_t, b: libc::uid_t) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.priority = Priority::Debug;
-        key1.table_key.uid = Some(a);
-        key1.table_key.gid = Some(123);
-        key1.set_service(s(b"test.service"));
-        key2.priority = Priority::Debug;
-        key2.table_key.uid = Some(b);
-        key2.table_key.gid = Some(123);
-        key2.set_service(s(b"test.service"));
-        key1.cmp(&key2) == a.cmp(&b)
+    #[test]
+    fn orders_based_on_uid_with_all_fields_initialized() {
+        propcheck::run(|&(a, b): &(libc::uid_t, libc::uid_t)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.priority = Priority::Debug;
+            key1.table_key.uid = Some(a);
+            key1.table_key.gid = Some(123);
+            key1.set_service(s(b"test.service"));
+            key2.priority = Priority::Debug;
+            key2.table_key.uid = Some(b);
+            key2.table_key.gid = Some(123);
+            key2.set_service(s(b"test.service"));
+            key1.cmp(&key2) == a.cmp(&b)
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_gid_with_all_fields_initialized(a: libc::gid_t, b: libc::gid_t) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.priority = Priority::Debug;
-        key1.table_key.uid = Some(123);
-        key1.table_key.gid = Some(a);
-        key1.set_service(s(b"test.service"));
-        key2.priority = Priority::Debug;
-        key2.table_key.uid = Some(123);
-        key2.table_key.gid = Some(b);
-        key2.set_service(s(b"test.service"));
-        key1.cmp(&key2) == a.cmp(&b)
+    #[test]
+    fn orders_based_on_gid_with_all_fields_initialized() {
+        propcheck::run(|&(a, b): &(libc::gid_t, libc::gid_t)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.priority = Priority::Debug;
+            key1.table_key.uid = Some(123);
+            key1.table_key.gid = Some(a);
+            key1.set_service(s(b"test.service"));
+            key2.priority = Priority::Debug;
+            key2.table_key.uid = Some(123);
+            key2.table_key.gid = Some(b);
+            key2.set_service(s(b"test.service"));
+            key1.cmp(&key2) == a.cmp(&b)
+        });
     }
 
-    #[quickcheck]
-    fn orders_based_on_service_with_all_fields_initialized(a: ServiceRepr, b: ServiceRepr) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
+    #[test]
+    fn orders_based_on_service_with_all_fields_initialized() {
+        propcheck::run(|(a, b): &(ServiceRepr, ServiceRepr)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
 
-        key1.priority = Priority::Debug;
-        key1.table_key.uid = Some(123);
-        key1.table_key.gid = Some(123);
-        key1.set_service(a.as_service().unwrap());
-        key2.priority = Priority::Debug;
-        key2.table_key.uid = Some(123);
-        key2.table_key.gid = Some(123);
-        key2.set_service(b.as_service().unwrap());
-        key1.cmp(&key2) == service_compare(a.as_service().unwrap(), b.as_service().unwrap())
+            key1.priority = Priority::Debug;
+            key1.table_key.uid = Some(123);
+            key1.table_key.gid = Some(123);
+            key1.set_service(a.as_service().unwrap());
+            key2.priority = Priority::Debug;
+            key2.table_key.uid = Some(123);
+            key2.table_key.gid = Some(123);
+            key2.set_service(b.as_service().unwrap());
+            key1.cmp(&key2) == service_compare(a.as_service().unwrap(), b.as_service().unwrap())
+        });
     }
 
     // Absent-before-present properties
 
-    #[quickcheck]
-    fn orders_no_uid_before_uid(uid: libc::uid_t) -> bool {
-        let key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key2.table_key.uid = Some(uid);
-        key1 < key2
+    #[test]
+    fn orders_no_uid_before_uid() {
+        propcheck::run(|&uid: &libc::uid_t| {
+            let key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key2.table_key.uid = Some(uid);
+            key1 < key2
+        });
     }
 
-    #[quickcheck]
-    fn orders_no_gid_before_gid(gid: libc::gid_t) -> bool {
-        let key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key2.table_key.gid = Some(gid);
-        key1 < key2
+    #[test]
+    fn orders_no_gid_before_gid() {
+        propcheck::run(|&gid: &libc::gid_t| {
+            let key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key2.table_key.gid = Some(gid);
+            key1 < key2
+        });
     }
 
-    #[quickcheck]
-    fn orders_no_service_before_service(service: ServiceRepr) -> bool {
-        let key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key2.set_service(service.as_service().unwrap());
-        key1 < key2
+    #[test]
+    fn orders_no_service_before_service() {
+        propcheck::run(|service: &ServiceRepr| {
+            let key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key2.set_service(service.as_service().unwrap());
+            key1 < key2
+        });
     }
 
     // Inter-group properties
@@ -384,24 +359,25 @@ mod tests {
         assert!(key1 < key2, "{key1:?} < {key2:?}");
     }
 
-    #[quickcheck]
-    fn orders_no_uid_some_gid_before_some_uid_no_gid(a: libc::uid_t, b: libc::gid_t) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.table_key.gid = Some(a);
-        key2.table_key.uid = Some(b);
-        key1 < key2
+    #[test]
+    fn orders_no_uid_some_gid_before_some_uid_no_gid() {
+        propcheck::run(|&(a, b): &(libc::uid_t, libc::gid_t)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.table_key.gid = Some(a);
+            key2.table_key.uid = Some(b);
+            key1 < key2
+        });
     }
 
-    #[quickcheck]
-    fn orders_some_gid_no_service_before_no_gid_some_service(
-        a: libc::gid_t,
-        b: ServiceRepr,
-    ) -> bool {
-        let mut key1 = MessageKey::new();
-        let mut key2 = MessageKey::new();
-        key1.set_service(b.as_service().unwrap());
-        key2.table_key.gid = Some(a);
-        key1 < key2
+    #[test]
+    fn orders_some_gid_no_service_before_no_gid_some_servic() {
+        propcheck::run(|(a, b): &(libc::gid_t, ServiceRepr)| {
+            let mut key1 = MessageKey::new();
+            let mut key2 = MessageKey::new();
+            key1.set_service(b.as_service().unwrap());
+            key2.table_key.gid = Some(*a);
+            key1 < key2
+        });
     }
 }

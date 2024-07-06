@@ -7,6 +7,8 @@ mod server;
 mod start;
 
 pub use start::start_child;
+pub use start::ChildOpts;
+// pub use start::ChildTls;
 
 // This shouldn't be seeing very many requests. If this many concurrent requests are occurring,
 // it's clearly a sign that *way* too many requests are being sent.

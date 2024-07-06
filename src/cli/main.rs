@@ -5,6 +5,7 @@ use crate::prelude::*;
 
 use super::args::Args;
 use crate::child::start_child;
+use crate::child::ChildOpts;
 use crate::cli::args::parse_args;
 use crate::ffi::normalize_errno;
 use crate::ffi::request_signal_when_parent_terminates;
@@ -41,8 +42,8 @@ pub fn main() {
     };
 
     let result = match args {
-        Args::Child => start_child(),
         Args::Parent(args) => start_parent(args),
+        Args::Child => ChildOpts::from_env().and_then(start_child),
     };
 
     match result {

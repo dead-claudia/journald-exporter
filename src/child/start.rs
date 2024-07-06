@@ -11,7 +11,6 @@ use crate::ffi::ExitCode;
 use crate::ffi::ExitResult;
 use std::net::Ipv4Addr;
 use std::net::TcpListener;
-use std::num::NonZeroU16;
 use std::os::unix::prelude::OsStrExt;
 use std::os::unix::prelude::OsStringExt;
 
@@ -19,13 +18,48 @@ static SERVER_STATE: ServerState<TinyHttpResponseContext> = ServerState::new();
 static REQUEST_CHANNEL: Channel<(Instant, tiny_http::Request), PENDING_REQUEST_CAPACITY> =
     Channel::new();
 
-fn get_port() -> Option<NonZeroU16> {
-    let result = std::env::var_os("PORT")?;
-    let port_num = parse_u32(result.as_bytes())?;
-    NonZeroU16::new(u16::try_from(port_num).ok()?)
+pub struct ChildTls {
+    pub certificate: Vec<u8>,
+    pub private_key: Vec<u8>,
 }
 
-pub fn start_child() -> io::Result<ExitResult> {
+pub struct ChildOpts {
+    pub port: u16,
+    pub tls: Option<ChildTls>,
+}
+
+impl ChildOpts {
+    pub fn from_env() -> io::Result<ChildOpts> {
+        let port = 'port: {
+            if let Some(result) = std::env::var_os("PORT") {
+                if let Some(num @ 0..=65535) = parse_u32(result.as_bytes()) {
+                    // Not sure why it's warning here. It's obviously checked.
+                    #[allow(clippy::as_conversions)]
+                    break 'port num as u16;
+                }
+            }
+
+            return Err(error!("Port is invalid or missing."));
+        };
+
+        let tls = match (
+            std::env::var_os("TLS_CERTIFICATE"),
+            std::env::var_os("TLS_PRIVATE_KEY"),
+        ) {
+            (Some(certificate), Some(private_key)) => Some(ChildTls {
+                certificate: certificate.into_vec(),
+                private_key: private_key.into_vec(),
+            }),
+            (None, None) => None,
+            (None, Some(_)) => return Err(error!("Received private key but not certificate.")),
+            (Some(_), None) => return Err(error!("Received certificate but not private key.")),
+        };
+
+        Ok(ChildOpts { port, tls })
+    }
+}
+
+pub fn start_child(opts: ChildOpts) -> io::Result<ExitResult> {
     // Set the standard input and output to non-blocking mode so reads will correctly not block.
     set_non_blocking(libc::STDIN_FILENO);
     set_non_blocking(libc::STDOUT_FILENO);
@@ -39,38 +73,29 @@ pub fn start_child() -> io::Result<ExitResult> {
         initialized: Instant::now(),
     };
 
-    let port = match get_port() {
-        Some(port) => port,
-        None => return Err(error!("Port is invalid or missing.")),
-    };
-
-    let tls = match (
-        std::env::var_os("TLS_CERTIFICATE"),
-        std::env::var_os("TLS_PRIVATE_KEY"),
-    ) {
-        (Some(certificate), Some(private_key)) => Some(tiny_http::SslConfig {
-            certificate: certificate.into_vec(),
-            private_key: private_key.into_vec(),
-        }),
-        (None, None) => None,
-        (None, Some(_)) => return Err(error!("Received private key but not certificate.")),
-        (Some(_), None) => return Err(error!("Received certificate but not private key.")),
-    };
-
-    let listener = match TcpListener::bind((Ipv4Addr::UNSPECIFIED, port.into())) {
+    let listener = match TcpListener::bind((Ipv4Addr::UNSPECIFIED, opts.port)) {
         Ok(listener) => listener,
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             return Err(error!(
                 ErrorKind::AddrInUse,
-                "TCP port {port} is already in use."
+                "TCP port {} is already in use.", opts.port,
             ))
         }
         Err(e) => return Err(e),
     };
 
-    log::info!("Server listener bound at port {port}.");
+    log::info!(
+        "Server listener bound at port {}.",
+        listener.local_addr()?.port()
+    );
 
-    let server = match tiny_http::Server::from_listener(listener, tls) {
+    let server = match tiny_http::Server::from_listener(
+        listener,
+        opts.tls.map(|tls| tiny_http::SslConfig {
+            certificate: tls.certificate,
+            private_key: tls.private_key,
+        }),
+    ) {
         Ok(server) => server,
         Err(e) => return Err(Error::new(ErrorKind::Other, e)),
     };
