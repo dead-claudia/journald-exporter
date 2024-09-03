@@ -109,7 +109,7 @@ jobs:
     if: success() || cancelled()
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ matrix.binary }}
       - run: chmod +x ${{ matrix.binary }}
@@ -170,7 +170,7 @@ jobs:
     if: success() || cancelled()
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         with:
           name: journald-exporter
       - run: chmod +x journald-exporter
